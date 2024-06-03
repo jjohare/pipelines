@@ -18,6 +18,7 @@ The pipeline will process the provided URLs, generate summaries considering the 
 """
 
 from typing import List, Union, Generator, Iterator
+from scrapegraphai.graphs import SmartScraperGraph
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import sys
@@ -51,10 +52,6 @@ async def setup_playwright():
     except Exception as e:
         print(f"Error setting up Playwright: {e}")
 
-
-from scrapegraphai.graphs import SmartScraperGraph
-
-
 class Pipeline:
     class Valves(BaseModel):
         """
@@ -68,7 +65,7 @@ class Pipeline:
     def __init__(self):
         self.name = "Web Summary Pipeline"
         self.valves = self.Valves()
-        asyncio.run(setup_playwright())  # Set up Playwright using asyncio.run()
+        asyncio.ensure_future(setup_playwright())  # Schedule the execution of setup_playwright()
 
     async def on_startup(self):
         """
@@ -81,7 +78,6 @@ class Pipeline:
         Async function called when the pipeline is shut down.
         """
         print(f"on_shutdown:{__name__}")
-
 
 def pipe(
     self, user_message: str, model_id: str, messages: List[dict], body: dict
