@@ -37,6 +37,10 @@ install("requests")
 install("scrapegraphai>=0.7.0")
 install("playwright")  # Install Playwright
 
+# Install Playwright browsers and dependencies
+subprocess.run(["playwright", "install"], check=True)
+subprocess.run(["playwright", "install-deps"], check=True)
+
 async def setup_playwright():
     """
     Set up Playwright by installing the required browsers.
