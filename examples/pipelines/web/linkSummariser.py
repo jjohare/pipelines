@@ -44,7 +44,6 @@ class Pipeline:
         These options can be set through the OpenWebUI interface.
         """
         OPENAI_API_KEY: str = ""  # OpenAI API key
-        URLS: List[str] = []  # List of URLs to be summarized
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
 
     def __init__(self):
@@ -63,23 +62,23 @@ class Pipeline:
         """
         print(f"on_shutdown:{__name__}")
 
-   def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
-    """
-    Main pipeline function that processes the user input and generates summaries.
-    """
-    print(f"pipe:{__name__}")
-    openai_key = self.valves.OPENAI_API_KEY
-    topics = self.valves.TOPICS.split(",")
+    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
+        """
+        Main pipeline function that processes the user input and generates summaries.
+        """
+        print(f"pipe:{__name__}")
+        openai_key = self.valves.OPENAI_API_KEY
+        topics = self.valves.TOPICS.split(",")
 
-    urls = user_message.split("\n")
+        urls = user_message.split("\n")
 
-    summaries = []
-    for url in urls:
-        summary = process_link(url, openai_key, topics)
-        if summary:
-            summaries.append(summary)
+        summaries = []
+        for url in urls:
+            summary = process_link(url, openai_key, topics)
+            if summary:
+                summaries.append(summary)
 
-    return "\n".join(summaries)
+        return "\n".join(summaries)
 
 def create_prompt(url, topics):
     """
@@ -137,4 +136,3 @@ def process_link(url, openai_key, topics):
     except Exception as e:
         print(f"Error processing {url}: {e}")
         return None
-        
