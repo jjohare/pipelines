@@ -24,6 +24,7 @@ import sys
 import subprocess
 import re
 
+
 def install(package):
     """
     Install the specified package using pip.
@@ -31,10 +32,12 @@ def install(package):
     """
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
+
 # Install the required dependencies
 install("requests")
 install("scrapegraphai>=0.7.0")
 install("playwright")  # Install Playwright
+
 
 def setup_playwright():
     """
@@ -42,23 +45,26 @@ def setup_playwright():
     """
     try:
         from playwright.sync_api import sync_playwright
+
         with sync_playwright() as p:
             p.chromium.install()
     except Exception as e:
         print(f"Error setting up Playwright: {e}")
 
+
 from scrapegraphai.graphs import SmartScraperGraph
 
-class Pipeline:
+
 class Pipeline:
     class Valves(BaseModel):
         """
         Configuration options for the pipeline.
         These options can be set through the OpenWebUI interface.
         """
+
         OPENAI_API_KEY: str = ""  # OpenAI API key
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
-        
+
     def __init__(self):
         self.name = "Web Summary Pipeline"
         self.valves = self.Valves()
@@ -76,7 +82,10 @@ class Pipeline:
         """
         print(f"on_shutdown:{__name__}")
 
-def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
+
+def pipe(
+    self, user_message: str, model_id: str, messages: List[dict], body: dict
+) -> Union[str, Generator, Iterator]:
     """
     Main pipeline function that processes the user input and generates summaries.
     """
@@ -93,6 +102,7 @@ def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dic
             summaries.append(summary)
 
     return "\n".join(summaries)
+
 
 def create_prompt(url, topics):
     """
@@ -114,6 +124,7 @@ def create_prompt(url, topics):
     )
     return prompt
 
+
 def process_link(url, openai_key, topics):
     """
     Process a single URL to generate a summary using Scrapegraph AI and OpenAI API.
@@ -129,23 +140,27 @@ def process_link(url, openai_key, topics):
     prompt = create_prompt(url, topics)
 
     smart_scraper_graph = SmartScraperGraph(
-        prompt=prompt,
-        source=url,
-        config=graph_config
+        prompt=prompt, source=url, config=graph_config
     )
 
     try:
         result = smart_scraper_graph.run()
         print("Result:", result)  # Debugging line to check the structure of result
-        summary = result.get('summary', '').strip().replace('"', '')
+        summary = result.get("summary", "").strip().replace('"', "")
 
-        if not summary or '404' in summary:
+        if not summary or "404" in summary:
             print(f"No summary found for URL: {url}")
             return None
 
         for topic in topics:
             if topic.lower() in summary.lower():
-                summary = re.sub(r'(\b{}\b)'.format(re.escape(topic)), r'[[{}]]'.format(topic), summary, count=1, flags=re.IGNORECASE)
+                summary = re.sub(
+                    r"(\b{}\b)".format(re.escape(topic)),
+                    r"[[{}]]".format(topic),
+                    summary,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
 
         return summary
     except Exception as e:
