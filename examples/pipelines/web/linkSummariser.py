@@ -5,9 +5,9 @@ This pipeline script integrates with OpenWebUI and Pipelines to generate summari
 
 To use this pipeline, add the following line to the PIPELINES_URLS environment variable when running the Docker container:
 
-https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipeline.py
+https://raw.githubusercontent.com/your-username/your-repo/main/linkSummariser.py
 
-Replace "https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipeline.py" with the actual URL of this script hosted on GitHub.
+Replace "https://raw.githubusercontent.com/your-username/your-repo/main/linkSummariser.py" with the actual URL of this script hosted on GitHub.
 
 Once the pipeline is running, you can access it through the OpenWebUI interface. Provide the following inputs:
 - OPENAI_API_KEY (in the admin panel): Your OpenAI API key.
@@ -34,6 +34,18 @@ def install(package):
 # Install the required dependencies
 install("requests")
 install("scrapegraphai>=0.7.0")
+install("playwright")  # Install Playwright
+
+def setup_playwright():
+    """
+    Set up Playwright by installing the required browsers.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            p.chromium.install()
+    except Exception as e:
+        print(f"Error setting up Playwright: {e}")
 
 from scrapegraphai.graphs import SmartScraperGraph
 
@@ -44,11 +56,12 @@ class Pipeline:
         These options can be set through the OpenWebUI interface.
         """
         OPENAI_API_KEY: str = ""  # OpenAI API key
-        TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
+        TOPICS: List[str] = []  # List of topics to be considered when generating summaries
 
     def __init__(self):
         self.name = "Web Summary Pipeline"
         self.valves = self.Valves()
+        setup_playwright()  # Set up Playwright
 
     async def on_startup(self):
         """
@@ -68,7 +81,7 @@ class Pipeline:
         """
         print(f"pipe:{__name__}")
         openai_key = self.valves.OPENAI_API_KEY
-        topics = self.valves.TOPICS.split(",")
+        topics = self.valves.TOPICS
 
         urls = user_message.split("\n")
 
@@ -109,6 +122,7 @@ def process_link(url, openai_key, topics):
             "api_key": openai_key,
             "model": "gpt-3.5-turbo-0125",
         },
+        "headless": True,  # Set headless to False
     }
 
     prompt = create_prompt(url, topics)
