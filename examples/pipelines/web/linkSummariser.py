@@ -3,9 +3,9 @@ Web Summary Pipeline for OpenWebUI and Pipelines
 
 This pipeline script integrates with OpenWebUI and Pipelines to generate summaries of web pages using the Scrapegraph AI library and OpenAI API.
 
-To use this pipeline, run the following Docker command:
+To use this pipeline, add the following line to the PIPELINES_URLS environment variable when running the Docker container:
 
-docker run -d -p 9099:9099 --add-host=host.docker.internal:host-gateway -e PIPELINES_URLS="https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipeline.py" -v pipelines:/app/pipelines --name pipelines --restart always ghcr.io/open-webui/pipelines:main
+https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipeline.py
 
 Replace "https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipeline.py" with the actual URL of this script hosted on GitHub.
 
@@ -23,18 +23,19 @@ from pydantic import BaseModel
 import sys
 import subprocess
 import re
-from scrapegraphai.graphs import SmartScraperGraph
 
 def install(package):
     """
     Install the specified package using pip.
-    This function is used to install the required dependencies (requests and scrapegraphai) within the pipeline script.
+    This function is used to install the required dependencies within the pipeline script.
     """
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 # Install the required dependencies
 install("requests")
-install("scrapegraphai")
+install("scrapegraphai>=0.7.0")
+
+from scrapegraphai.graphs import SmartScraperGraph
 
 class Pipeline:
     class Valves(BaseModel):
@@ -135,3 +136,4 @@ def process_link(url, openai_key, topics):
     except Exception as e:
         print(f"Error processing {url}: {e}")
         return None
+        
