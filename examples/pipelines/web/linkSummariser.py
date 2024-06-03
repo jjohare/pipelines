@@ -10,9 +10,9 @@ https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipel
 Replace "https://raw.githubusercontent.com/your-username/your-repo/main/web_summary_pipeline.py" with the actual URL of this script hosted on GitHub.
 
 Once the pipeline is running, you can access it through the OpenWebUI interface. Provide the following inputs:
-- OPENAI_API_KEY: Your OpenAI API key.
-- URLS: A single URL or a comma-separated list of URLs to be summarized.
-- TOPICS: A comma-separated list of topics to be considered when generating summaries.
+- OPENAI_API_KEY (in the admin panel): Your OpenAI API key.
+- TOPICS (in the admin panel): A comma-separated list of topics to be considered when generating summaries.
+- URL(s) (in the main interaction panel): A single URL or a line-separated list of URLs to be summarized.
 
 The pipeline will process the provided URLs, generate summaries considering the specified topics, and return the summaries to the OpenWebUI interface.
 """
@@ -63,22 +63,23 @@ class Pipeline:
         """
         print(f"on_shutdown:{__name__}")
 
-    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
-        """
-        Main pipeline function that processes the user input and generates summaries.
-        """
-        print(f"pipe:{__name__}")
-        openai_key = self.valves.OPENAI_API_KEY
-        urls = self.valves.URLS
-        topics = self.valves.TOPICS.split(",")
+   def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
+    """
+    Main pipeline function that processes the user input and generates summaries.
+    """
+    print(f"pipe:{__name__}")
+    openai_key = self.valves.OPENAI_API_KEY
+    topics = self.valves.TOPICS.split(",")
 
-        summaries = []
-        for url in urls:
-            summary = process_link(url, openai_key, topics)
-            if summary:
-                summaries.append(summary)
+    urls = user_message.split("\n")
 
-        return "\n".join(summaries)
+    summaries = []
+    for url in urls:
+        summary = process_link(url, openai_key, topics)
+        if summary:
+            summaries.append(summary)
+
+    return "\n".join(summaries)
 
 def create_prompt(url, topics):
     """
