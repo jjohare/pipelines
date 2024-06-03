@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import sys
 import subprocess
 import re
+import asyncio
 
 
 def install(package):
@@ -39,15 +40,14 @@ install("scrapegraphai>=0.7.0")
 install("playwright")  # Install Playwright
 
 
-def setup_playwright():
+async def setup_playwright():
     """
     Set up Playwright by installing the required browsers.
     """
     try:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            p.chromium.install()
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            await p.chromium.install()
     except Exception as e:
         print(f"Error setting up Playwright: {e}")
 
@@ -68,7 +68,7 @@ class Pipeline:
     def __init__(self):
         self.name = "Web Summary Pipeline"
         self.valves = self.Valves()
-        setup_playwright()  # Set up Playwright
+        asyncio.run(setup_playwright())  # Set up Playwright using asyncio.run()
 
     async def on_startup(self):
         """
