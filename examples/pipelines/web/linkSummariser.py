@@ -15,7 +15,9 @@ Once the pipeline is running, you can access it through the OpenWebUI interface.
 - URL(s) (in the main interaction panel): A single URL or a line-separated list of URLs to be summarized.
 
 The pipeline will process the provided URLs, generate summaries considering the specified topics, and return the summaries to the OpenWebUI interface.
+.
 """
+
 
 from typing import List, Union, Generator, Iterator
 from schemas import OpenAIChatMessage
