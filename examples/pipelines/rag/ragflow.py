@@ -1,29 +1,23 @@
 """
 title: RAGFlow Pipeline
-author: ClaudeOpus
+author: Claude Opus
 date: 2024-05-30
 version: 1.0
 license: MIT
 description: A pipeline for retrieving relevant information from a knowledge base using the RAGFlow API.
 requirements: requests
-configuration:
-
-
-
-name: api_key
-type: str
-default: ""
-description: Your RAGFlow API key.
 """
+
 
 from typing import List, Union, Generator, Iterator
 from schemas import OpenAIChatMessage
 import requests
 
+
 class Pipeline:
-def init(self, api_key: str):
+def init(self):
 self.base_url = "http://localhost:8000/v1/"
-self.api_key = api_key
+self.api_key = "your-api-key-here"
 self.headers = {"Authorization": f"Bearer {self.api_key}"}
 self.conversation_id = None
 
