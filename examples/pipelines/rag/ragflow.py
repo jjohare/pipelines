@@ -50,7 +50,7 @@ async def on_shutdown(self):
     pass
 
 def pipe(
-    self, user_message: str, model_id: str, messages: List[dict], body: dict
+    self, user_message: str, model_id: str, messages: List[OpenAIChatMessage], body: dict
 ) -> Union[str, Generator, Iterator]:
     # Send the user message to RAGFlow and retrieve the answer
     data = {
