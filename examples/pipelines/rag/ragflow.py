@@ -1,11 +1,24 @@
 """
 title: RAGFlow Pipeline
-author: Claude Opus
+author: open-webui
 date: 2024-05-30
 version: 1.0
 license: MIT
 description: A pipeline for retrieving relevant information from a knowledge base using the RAGFlow API.
 requirements: requests
+configuration:
+
+
+
+name: api_key
+type: str
+default: ""
+description: Your RAGFlow API key.
+
+name: base_url
+type: str
+default: "http://localhost:8000/v1/"
+description: The base URL of the RAGFlow API endpoint.
 """
 
 
@@ -15,11 +28,12 @@ import requests
 
 
 class Pipeline:
-def init(self):
-self.base_url = "http://localhost:8000/v1/"
-self.api_key = "your-api-key-here"
+def init(self, api_key: str, base_url: str):
+self.base_url = base_url
+self.api_key = api_key
 self.headers = {"Authorization": f"Bearer {self.api_key}"}
 self.conversation_id = None
+
 
 async def on_startup(self):
     # Create a new conversation
