@@ -31,14 +31,18 @@ class Pipeline:
     async def on_startup(self):
         # Create a new conversation
         response = requests.get(
-            f"{self.valves.ragflow_base_url}new_conversation",
+            f"{self.valves.ragflow_base_url}api/new_conversation",
             headers=self.headers,
             params={"user_id": self.user_id}
         )
         if response.status_code == 200:
-            self.conversation_id = response.json().get("data", {}).get("id")
+            try:
+                data = response.json()
+                self.conversation_id = data["data"]["id"]
+            except ValueError as e:
+                raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
         else:
-            raise Exception(f"Failed to create a new conversation: {response.text}")
+            raise Exception(f"Failed to create a new conversation: {response.status_code}, {response.text}")
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
@@ -52,13 +56,18 @@ class Pipeline:
             "stream": False,
         }
         response = requests.post(
-            f"{self.valves.ragflow_base_url}completion", json=data, headers=self.headers
+            f"{self.valves.ragflow_base_url}api/completion", json=data, headers=self.headers
         )
+
         if response.status_code == 200:
-            answer = response.json().get("data", {}).get("answer", "No answer found.")
-            return answer
+            try:
+                data = response.json()
+                answer = data["data"]["answer"]
+                return answer
+            except ValueError as e:
+                raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
         else:
-            raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.text}")
+            raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.status_code}, {response.text}")
 
     def configure(self, config: dict):
         """
