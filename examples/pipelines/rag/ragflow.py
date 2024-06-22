@@ -1,13 +1,3 @@
-"""
-title: RAGFlow Pipeline
-author: open-webui
-date: 2024-10-01
-version: 1.0
-license: MIT
-description: A pipeline for retrieving relevant information from a knowledge base using the RAGFlow API.
-requirements: requests
-"""
-
 import os
 import requests
 import logging
@@ -71,16 +61,12 @@ class Pipeline:
             logging.debug(f"Response status code: {response.status_code}")
 
             if response.status_code == 200:
-                try:
-                    data = response.json()
-                    logging.debug(f"Response JSON: {data}")
-                    answer = data.get("data", {}).get("answer", "No answer found.")
-                    if answer is None:
-                        raise ValueError("Missing answer in response")
-                    return answer
-                except ValueError as e:
-                    logging.error(f"Failed to parse JSON response: {str(e)}, {response.text}")
-                    raise
+                data = response.json()
+                logging.debug(f"Response JSON: {data}")
+                answer = data.get("data", {}).get("answer", "No answer found.")
+                if answer is None:
+                    raise ValueError("Missing answer in response")
+                return answer
             elif response.status_code == 404:
                 logging.error(f"RAGFlow API returned a 404 error: {response.text}")
                 return "Sorry, the requested resource was not found."
