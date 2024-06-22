@@ -32,66 +32,71 @@ class Pipeline:
 
     async def on_startup(self):
         # Create a new conversation with GET method and URL-encoded parameters
-        url = f"{self.valves.ragflow_base_url}api/new_conversation"
-        params = {"user_id": self.user_id}
-        logging.debug(f"Requesting new conversation: URL = {url}, Params = {params}, Headers = {self.headers}")
+        try:
+            url = f"{self.valves.ragflow_base_url}api/new_conversation"
+            params = {"user_id": self.user_id}
+            logging.debug(f"Requesting new conversation: URL = {url}, Params = {params}, Headers = {self.headers}")
 
-        response = requests.get(url, headers=self.headers, params=params)
-        
-        logging.debug(f"Response status code: {response.status_code}")
-        if response.status_code == 200:
-            try:
+            response = requests.get(url, headers=self.headers, params=params)
+            logging.debug(f"Response status code: {response.status_code}")
+
+            if response.status_code == 200:
                 data = response.json()
                 logging.debug(f"Response JSON: {data}")
                 self.conversation_id = data.get("data", {}).get("id")
                 if not self.conversation_id:
                     raise ValueError("Missing conversation ID in response")
-            except (ValueError, KeyError, AttributeError) as e:
-                raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
-        else:
-            raise Exception(f"Failed to create a new conversation: {response.status_code}, {response.text}")
+            else:
+                raise Exception(f"Failed to create a new conversation: {response.status_code}, {response.text}")
+        except Exception as e:
+            logging.error(f"Error during on_startup: {str(e)}")
+            raise
 
     async def on_shutdown(self):
         # This function is called when the server is stopped.
         pass
 
     def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
-        # Send the user message to RAGFlow and retrieve the answer
-        url = f"{self.valves.ragflow_base_url}api/completion"
-        data = {
-            "conversation_id": self.conversation_id,
-            "messages": [{"role": "user", "content": user_message}],
-            "stream": False,
-        }
-        logging.debug(f"Requesting completion: URL = {url}, Data = {data}, Headers = {self.headers}")
+        try:
+            url = f"{self.valves.ragflow_base_url}api/completion"
+            data = {
+                "conversation_id": self.conversation_id,
+                "messages": [{"role": "user", "content": user_message}],
+                "stream": False,
+            }
+            logging.debug(f"Requesting completion: URL = {url}, Data = {data}, Headers = {self.headers}")
 
-        response = requests.post(url, headers=self.headers, json=data)
-        
-        logging.debug(f"Response status code: {response.status_code}")
-        if response.status_code == 200:
-            try:
+            response = requests.post(url, headers=self.headers, json=data)
+            logging.debug(f"Response status code: {response.status_code}")
+
+            if response.status_code == 200:
                 data = response.json()
                 logging.debug(f"Response JSON: {data}")
                 answer = data.get("data", {}).get("answer", "No answer found.")
                 if answer is None:
                     raise ValueError("Missing answer in response")
                 return answer
-            except (ValueError, KeyError, AttributeError) as e:
-                raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
-        elif response.status_code == 404:
-            # Handle the case when the API returns a 404 error
-            logging.error(f"RAGFlow API returned a 404 error: {response.text}")
-            return "Sorry, the requested resource was not found."
-        else:
-            raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.status_code}, {response.text}")
+            elif response.status_code == 404:
+                # Handle the case when the API returns a 404 error
+                logging.error(f"RAGFlow API returned a 404 error: {response.text}")
+                return "Sorry, the requested resource was not found."
+            else:
+                raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.status_code}, {response.text}")
+        except Exception as e:
+            logging.error(f"Error during pipe execution: {str(e)}")
+            raise
 
     def configure(self, config: dict):
         """
         Configure the pipeline with the provided settings in the admin panel.
         """
-        self.valves.ragflow_base_url = config.get("ragflow_base_url", self.valves.ragflow_base_url)
-        self.valves.ragflow_api_key = config.get("ragflow_api_key", self.valves.ragflow_api_key)
-        self.headers = {"Authorization": f"Bearer {self.valves.ragflow_api_key}"}
-        logging.debug(f"Pipeline configured: Base URL = {self.valves.ragflow_base_url}, API Key = {self.valves.ragflow_api_key}")
+        try:
+            self.valves.ragflow_base_url = config.get("ragflow_base_url", self.valves.ragflow_base_url)
+            self.valves.ragflow_api_key = config.get("ragflow_api_key", self.valves.ragflow_api_key)
+            self.headers = {"Authorization": f"Bearer {self.valves.ragflow_api_key}"}
+            logging.debug(f"Pipeline configured: Base URL = {self.valves.ragflow_base_url}, API Key = {self.valves.ragflow_api_key}")
+        except Exception as e:
+            logging.error(f"Error during configuration: {str(e)}")
+            raise
 
 pipeline = Pipeline()
