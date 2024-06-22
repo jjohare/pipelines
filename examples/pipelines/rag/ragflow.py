@@ -8,10 +8,14 @@ description: A pipeline for retrieving relevant information from a knowledge bas
 requirements: requests
 """
 
+import logging
 from typing import List, Union, Generator, Iterator
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import requests
+
+logging.basicConfig(level=logging.DEBUG)
+
 
 class Pipeline:
     class Valves(BaseModel):
@@ -38,8 +42,11 @@ class Pipeline:
         if response.status_code == 200:
             try:
                 data = response.json()
-                self.conversation_id = data["data"]["id"]
-            except ValueError as e:
+                logging.debug(f"Response from new_conversation: {data}")
+                self.conversation_id = data.get("data", {}).get("id")
+                if not self.conversation_id:
+                    raise ValueError("Missing conversation ID in response")
+            except (ValueError, KeyError) as e:
                 raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
         else:
             raise Exception(f"Failed to create a new conversation: {response.status_code}, {response.text}")
@@ -62,9 +69,12 @@ class Pipeline:
         if response.status_code == 200:
             try:
                 data = response.json()
-                answer = data["data"]["answer"]
+                logging.debug(f"Response from completion: {data}")
+                answer = data.get("data", {}).get("answer", "No answer found.")
+                if answer is None:
+                    raise ValueError("Missing answer in response")
                 return answer
-            except ValueError as e:
+            except (ValueError, KeyError) as e:
                 raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
         else:
             raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.status_code}, {response.text}")
