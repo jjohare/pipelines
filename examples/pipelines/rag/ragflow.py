@@ -13,7 +13,7 @@ from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
 import requests
 
-logging.basicConfig(level=logging.DEBUG)
+# logging.basicConfig(level=logging.DEBUG)
 
 class Pipeline:
     class Valves(BaseModel):
@@ -21,8 +21,8 @@ class Pipeline:
         Configuration options for the pipeline.
         These options can be set through the OpenWebUI interface.
         """
-        ragflow_base_url: str = "http://192.168.0.51/v1/"
-        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0Mm"
+        ragflow_base_url: str = "http://your server ip for ragflow/v1/"
+        ragflow_api_key: str = "ragflow-api key from the chat bot page"
 
     def __init__(self):
         self.valves = self.Valves()
