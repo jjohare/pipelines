@@ -38,14 +38,16 @@ class Pipeline:
         logging.debug(f"Requesting new conversation: URL = {url}, Data = {data}, Headers = {self.headers}")
 
         response = requests.post(url, headers=self.headers, json=data)
+        
+        logging.debug(f"Response status code: {response.status_code}")
         if response.status_code == 200:
             try:
                 data = response.json()
-                logging.debug(f"Response from new_conversation: {data}")
+                logging.debug(f"Response JSON: {data}")
                 self.conversation_id = data.get("data", {}).get("id")
                 if not self.conversation_id:
                     raise ValueError("Missing conversation ID in response")
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError, AttributeError) as e:
                 raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
         else:
             raise Exception(f"Failed to create a new conversation: {response.status_code}, {response.text}")
@@ -65,13 +67,17 @@ class Pipeline:
         logging.debug(f"Requesting completion: URL = {url}, Data = {data}, Headers = {self.headers}")
 
         response = requests.post(url, headers=self.headers, json=data)
+        
+        logging.debug(f"Response status code: {response.status_code}")
         if response.status_code == 200:
             try:
                 data = response.json()
-                logging.debug(f"Response from completion: {data}")
+                logging.debug(f"Response JSON: {data}")
                 answer = data.get("data", {}).get("answer", "No answer found.")
+                if answer is None:
+                    raise ValueError("Missing answer in response")
                 return answer
-            except (ValueError, KeyError) as e:
+            except (ValueError, KeyError, AttributeError) as e:
                 raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
         else:
             raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.status_code}, {response.text}")
