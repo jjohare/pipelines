@@ -31,12 +31,12 @@ class Pipeline:
         self.user_id = "user_123"
 
     async def on_startup(self):
-        # Create a new conversation with POST method
+        # Create a new conversation with GET method and URL-encoded parameters
         url = f"{self.valves.ragflow_base_url}api/new_conversation"
-        data = {"user_id": self.user_id}
-        logging.debug(f"Requesting new conversation: URL = {url}, Data = {data}, Headers = {self.headers}")
+        params = {"user_id": self.user_id}
+        logging.debug(f"Requesting new conversation: URL = {url}, Params = {params}, Headers = {self.headers}")
 
-        response = requests.post(url, headers=self.headers, json=data)
+        response = requests.get(url, headers=self.headers, params=params)
         
         logging.debug(f"Response status code: {response.status_code}")
         if response.status_code == 200:
@@ -78,6 +78,10 @@ class Pipeline:
                 return answer
             except (ValueError, KeyError, AttributeError) as e:
                 raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
+        elif response.status_code == 404:
+            # Handle the case when the API returns a 404 error
+            logging.error(f"RAGFlow API returned a 404 error: {response.text}")
+            return "Sorry, the requested resource was not found."
         else:
             raise Exception(f"Failed to retrieve the answer from RAGFlow: {response.status_code}, {response.text}")
 
