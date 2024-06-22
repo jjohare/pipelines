@@ -24,7 +24,7 @@ class Pipeline:
         These options can be set through the OpenWebUI interface.
         """
         ragflow_base_url: str = "http://192.168.0.51/v1/api/"
-        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0M"
+        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0Mm"
 
     def __init__(self):
         self.valves = self.Valves()
