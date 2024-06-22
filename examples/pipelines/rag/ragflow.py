@@ -70,9 +70,6 @@ class Pipeline:
             response = requests.post(url, headers=self.headers, json=data)
             logging.debug(f"Response status code: {response.status_code}")
 
-            # Print the raw response content to console for inspection
-            print(f"Raw response content: {response.text}")
-
             if response.status_code == 200:
                 try:
                     data = response.json()
