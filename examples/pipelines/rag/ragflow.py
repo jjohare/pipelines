@@ -10,7 +10,6 @@ requirements: requests
 
 import logging
 from typing import List, Union, Generator, Iterator
-from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import requests
 
@@ -22,8 +21,8 @@ class Pipeline:
         Configuration options for the pipeline.
         These options can be set through the OpenWebUI interface.
         """
-        ragflow_base_url: str = "http://192.168.0.51/v1/api/"
-        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0M"
+        ragflow_base_url: str = "http://192.168.0.51/v1/"
+        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0Mm"
 
     def __init__(self):
         self.valves = self.Valves()
@@ -89,9 +88,6 @@ class Pipeline:
         self.valves.ragflow_base_url = config.get("ragflow_base_url", self.valves.ragflow_base_url)
         self.valves.ragflow_api_key = config.get("ragflow_api_key", self.valves.ragflow_api_key)
         self.headers = {"Authorization": f"Bearer {self.valves.ragflow_api_key}"}
-        # Ensure the base URL ends with a slash
-        if not self.valves.ragflow_base_url.endswith("/"):
-            self.valves.ragflow_base_url += "/"
         logging.debug(f"Pipeline configured: Base URL = {self.valves.ragflow_base_url}, API Key = {self.valves.ragflow_api_key}")
 
 pipeline = Pipeline()
