@@ -8,19 +8,14 @@ description: A pipeline for retrieving relevant information from a knowledge bas
 requirements: requests
 """
 
-import logging
-from typing import List, Union, Generator, Iterator
-from pydantic import BaseModel
+import os
 import requests
+import logging
 
 logging.basicConfig(level=logging.DEBUG)
 
 class Pipeline:
     class Valves(BaseModel):
-        """
-        Configuration options for the pipeline.
-        These options can be set through the OpenWebUI interface.
-        """
         ragflow_base_url: str = "http://192.168.0.51/v1/"
         ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0Mm"
 
@@ -31,8 +26,15 @@ class Pipeline:
         self.user_id = "user_123"
 
     async def on_startup(self):
-        # Create a new conversation with GET method and URL-encoded parameters
+        # Log environment info
+        logging.debug(f"Environment variables: {os.environ}")
         try:
+            # Network connectivity test
+            logging.debug("Testing network connectivity...")
+            connectivity_response = requests.get("http://192.168.0.51/v1/api/new_conversation", headers=self.headers, params={"user_id": "test"})
+            logging.debug(f"Connectivity test status code: {connectivity_response.status_code}")
+
+            # Create a new conversation
             url = f"{self.valves.ragflow_base_url}api/new_conversation"
             params = {"user_id": self.user_id}
             logging.debug(f"Requesting new conversation: URL = {url}, Params = {params}, Headers = {self.headers}")
@@ -53,7 +55,6 @@ class Pipeline:
             raise
 
     async def on_shutdown(self):
-        # This function is called when the server is stopped.
         pass
 
     def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
@@ -70,14 +71,17 @@ class Pipeline:
             logging.debug(f"Response status code: {response.status_code}")
 
             if response.status_code == 200:
-                data = response.json()
-                logging.debug(f"Response JSON: {data}")
-                answer = data.get("data", {}).get("answer", "No answer found.")
-                if answer is None:
-                    raise ValueError("Missing answer in response")
-                return answer
+                try:
+                    data = response.json()
+                    logging.debug(f"Response JSON: {data}")
+                    answer = data.get("data", {}).get("answer", "No answer found.")
+                    if answer is None:
+                        raise ValueError("Missing answer in response")
+                    return answer
+                except ValueError as e:
+                    logging.error(f"Failed to parse JSON response: {str(e)}, {response.text}")
+                    raise
             elif response.status_code == 404:
-                # Handle the case when the API returns a 404 error
                 logging.error(f"RAGFlow API returned a 404 error: {response.text}")
                 return "Sorry, the requested resource was not found."
             else:
@@ -87,9 +91,6 @@ class Pipeline:
             raise
 
     def configure(self, config: dict):
-        """
-        Configure the pipeline with the provided settings in the admin panel.
-        """
         try:
             self.valves.ragflow_base_url = config.get("ragflow_base_url", self.valves.ragflow_base_url)
             self.valves.ragflow_api_key = config.get("ragflow_api_key", self.valves.ragflow_api_key)
