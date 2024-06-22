@@ -50,15 +50,16 @@ class Pipeline:
         Configure the pipeline with the provided settings.
         This method will be called by OpenWebUI with the settings from the admin panel.
         """
-        self.base_url = config.get("ragflow_base_url", self.base_url)
-        self.api_key = config.get("ragflow_api_key", self.api_key)
+        if isinstance(config, dict):
+            self.base_url = config.get("ragflow_base_url") or self.base_url
+            self.api_key = config.get("ragflow_api_key") or self.api_key
         
-        # Ensure the base URL ends with a slash
-        if self.base_url and not self.base_url.endswith("/"):
-            self.base_url += "/"
+            # Ensure the base URL ends with a slash
+            if self.base_url and not self.base_url.endswith("/"):
+                self.base_url += "/"
         
-        # Update headers with new API key
-        self.headers = {"Authorization": f"Bearer {self.api_key}"}
+            # Update headers with new API key
+            self.headers = {"Authorization": f"Bearer {self.api_key}"}
 
 pipeline = Pipeline()
 
@@ -71,14 +72,14 @@ def get_config_schema():
             "type": "string",
             "required": False,
             "label": "RAGFlow Base URL",
-            "placeholder": "http://192.168.0.xx/v1/api/",
-            "default": "http://192.168.0.xx/v1/api/"
+            "placeholder": "http://192.168.0.51/v1/api/",
+            "default": "http://192.168.0.51/v1/api/"
         },
         "ragflow_api_key": {
             "type": "string",
             "required": False,
             "label": "RAGFlow API Key",
-            "placeholder": "ragflow-default",
-            "default": "ragflow-default"
+            "placeholder": "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0M",
+            "default": "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0M"
         }
     }
