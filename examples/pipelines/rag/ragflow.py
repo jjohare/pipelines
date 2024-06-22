@@ -29,7 +29,7 @@ class Pipeline:
         self.valves = self.Valves()
         self.conversation_id = None
         self.headers = {"Authorization": f"Bearer {self.valves.ragflow_api_key}"}
-        self.user_id = "user_" + str(int(time.time()))  # Generate dynamic user ID
+        self.user_id = "user_123"
 
     async def on_startup(self):
         # Create a new conversation with POST method
@@ -40,7 +40,6 @@ class Pipeline:
         response = requests.post(url, headers=self.headers, json=data)
         
         logging.debug(f"Response status code: {response.status_code}")
-        logging.debug(f"Full response: {response.text}")
         if response.status_code == 200:
             try:
                 data = response.json()
@@ -70,7 +69,6 @@ class Pipeline:
         response = requests.post(url, headers=self.headers, json=data)
         
         logging.debug(f"Response status code: {response.status_code}")
-        logging.debug(f"Full response: {response.text}")
         if response.status_code == 200:
             try:
                 data = response.json()
