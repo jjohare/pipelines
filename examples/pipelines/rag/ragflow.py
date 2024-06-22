@@ -16,7 +16,6 @@ import requests
 
 logging.basicConfig(level=logging.DEBUG)
 
-
 class Pipeline:
     class Valves(BaseModel):
         """
@@ -24,7 +23,7 @@ class Pipeline:
         These options can be set through the OpenWebUI interface.
         """
         ragflow_base_url: str = "http://192.168.0.51/v1/api/"
-        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0Mm"
+        ragflow_api_key: str = "ragflow-g3NzY5MDQ2MmU4NDExZWZiZTcwMDI0M"
 
     def __init__(self):
         self.valves = self.Valves()
@@ -33,12 +32,12 @@ class Pipeline:
         self.user_id = "user_123"
 
     async def on_startup(self):
-        # Create a new conversation
-        response = requests.get(
-            f"{self.valves.ragflow_base_url}api/new_conversation",
-            headers=self.headers,
-            params={"user_id": self.user_id}
-        )
+        # Create a new conversation with POST method
+        url = f"{self.valves.ragflow_base_url}api/new_conversation"
+        data = {"user_id": self.user_id}
+        logging.debug(f"Requesting new conversation: URL = {url}, Data = {data}, Headers = {self.headers}")
+
+        response = requests.post(url, headers=self.headers, json=data)
         if response.status_code == 200:
             try:
                 data = response.json()
@@ -57,22 +56,20 @@ class Pipeline:
 
     def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
         # Send the user message to RAGFlow and retrieve the answer
+        url = f"{self.valves.ragflow_base_url}api/completion"
         data = {
             "conversation_id": self.conversation_id,
             "messages": [{"role": "user", "content": user_message}],
             "stream": False,
         }
-        response = requests.post(
-            f"{self.valves.ragflow_base_url}api/completion", json=data, headers=self.headers
-        )
+        logging.debug(f"Requesting completion: URL = {url}, Data = {data}, Headers = {self.headers}")
 
+        response = requests.post(url, headers=self.headers, json=data)
         if response.status_code == 200:
             try:
                 data = response.json()
                 logging.debug(f"Response from completion: {data}")
                 answer = data.get("data", {}).get("answer", "No answer found.")
-                if answer is None:
-                    raise ValueError("Missing answer in response")
                 return answer
             except (ValueError, KeyError) as e:
                 raise Exception(f"Failed to parse JSON response: {str(e)}, {response.text}")
@@ -89,5 +86,6 @@ class Pipeline:
         # Ensure the base URL ends with a slash
         if not self.valves.ragflow_base_url.endswith("/"):
             self.valves.ragflow_base_url += "/"
+        logging.debug(f"Pipeline configured: Base URL = {self.valves.ragflow_base_url}, API Key = {self.valves.ragflow_api_key}")
 
 pipeline = Pipeline()
