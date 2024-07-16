@@ -1,23 +1,31 @@
 """
 Web Summary Pipeline for OpenWebUI and Pipelines
 
-This pipeline script integrates with OpenWebUI and Pipelines to generate summaries of web pages using OpenAI API.
-It includes optimizations for efficient scraping, content filtering, and batched processing to reduce API token usage.
+This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
+and generate summaries of web pages using the OpenAI API.
 
 Key features:
+- URL extraction from unstructured text using regex
 - Efficient web scraping using Playwright
 - Content filtering to reduce irrelevant data
 - Batched processing of URLs
 - Topic highlighting in summaries
 - Customizable summary length and batch size
+
+Usage:
+1. Set the OPENAI_API_KEY in the Valves configuration.
+2. Set the TOPICS (comma-separated) in the Valves configuration.
+3. Optionally adjust MAX_TOKENS and BATCH_SIZE in the Valves configuration.
+4. Input unstructured text containing URLs in the user message.
+5. The pipeline will extract URLs, scrape the web pages, and generate summaries.
 """
 
+import re
 from typing import List, Union, Generator, Iterator
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import sys
 import subprocess
-import re
 import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
@@ -42,6 +50,20 @@ install("openai")
 # Install Playwright browsers and dependencies
 subprocess.run(["playwright", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
+
+def extract_urls(text):
+    """
+    Extract URLs from unstructured text using regex.
+
+    Args:
+        text (str): Unstructured text potentially containing URLs.
+
+    Returns:
+        List[str]: A list of extracted URLs.
+    """
+    # This regex pattern matches most common URL formats
+    url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+    return list(set(re.findall(url_pattern, text)))
 
 async def setup_playwright():
     """
@@ -202,6 +224,8 @@ class Pipeline:
         """
         OPENAI_API_KEY: str = ""  # OpenAI API key
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
+        MAX_TOKENS: int = 2000  # Maximum number of tokens for each summary
+        BATCH_SIZE: int = 10  # Number of URLs to process in each batch
 
     def __init__(self):
         self.name = "Web Summary Pipeline"
@@ -222,31 +246,37 @@ class Pipeline:
 
     def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
         """
-        Main pipeline function that processes the user input and generates summaries.
+        Main pipeline function that processes the user input, extracts URLs, and generates summaries.
 
         Args:
-            user_message (str): The user's input message containing URLs to summarize.
+            user_message (str): The user's input message containing unstructured text with URLs.
             model_id (str): The ID of the model to use (not used in this implementation).
             messages (List[dict]): Previous messages in the conversation (not used in this implementation).
             body (dict): Additional request body information (not used in this implementation).
 
         Returns:
-            str: The generated summaries for the provided URLs.
+            str: The generated summaries for the extracted URLs.
         """
         print(f"pipe:{__name__}")
         openai_key = self.valves.OPENAI_API_KEY
         topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
-        urls = user_message.split("\n")
+        max_tokens = self.valves.MAX_TOKENS
+        batch_size = self.valves.BATCH_SIZE
+        
+        # Extract URLs from the unstructured text
+        urls = extract_urls(user_message)
+        
+        if not urls:
+            return "No valid URLs found in the input text."
         
         client = AsyncOpenAI(api_key=openai_key)
         
-        # Process URLs in batches of 5
-        batch_size = 5
+        # Process URLs in batches
         all_summaries = []
         
         for i in range(0, len(urls), batch_size):
             batch = urls[i:i+batch_size]
-            batch_summaries = asyncio.run(summarize_batch(client, batch, topics, 150))
+            batch_summaries = asyncio.run(summarize_batch(client, batch, topics, max_tokens))
             all_summaries.append(batch_summaries)
         
         combined_summaries = "\n".join(all_summaries)
