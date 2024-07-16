@@ -1,5 +1,5 @@
 """
-Web Summary Pipeline for OpenWebUI and Pipelines
+Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 
 This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
 and generate summaries of web pages using the OpenAI API.
@@ -11,13 +11,15 @@ Key features:
 - Batched processing of URLs
 - Topic highlighting in summaries
 - Customizable summary length and batch size
+- Model selection from available OpenAI models
 
 Usage:
 1. Set the OPENAI_API_KEY in the Valves configuration.
 2. Set the TOPICS (comma-separated) in the Valves configuration.
-3. Optionally adjust MAX_TOKENS and BATCH_SIZE in the Valves configuration.
-4. Input unstructured text containing URLs in the user message.
-5. The pipeline will extract URLs, scrape the web pages, and generate summaries.
+3. Select the desired model from the dropdown in the Valves configuration.
+4. Optionally adjust MAX_TOKENS and BATCH_SIZE in the Valves configuration.
+5. Input unstructured text containing URLs in the user message.
+6. The pipeline will extract URLs, scrape the web pages, and generate summaries.
 """
 
 import re
@@ -158,7 +160,7 @@ async def scrape_url(url):
         finally:
             await browser.close()
 
-async def summarize_batch(client, urls, topics, max_tokens):
+async def summarize_batch(client, urls, topics, max_tokens, model):
     """
     Summarize a batch of URLs using the OpenAI API.
 
@@ -167,6 +169,7 @@ async def summarize_batch(client, urls, topics, max_tokens):
         urls (List[str]): List of URLs to summarize.
         topics (List[str]): List of topics to consider in the summaries.
         max_tokens (int): Maximum number of tokens for each summary.
+        model (str): The OpenAI model to use for summarization.
 
     Returns:
         str: The generated summaries for the batch of URLs.
@@ -182,7 +185,7 @@ async def summarize_batch(client, urls, topics, max_tokens):
     ]
     
     response = await client.chat.completions.create(
-        model="gpt-3.5-turbo-0125",
+        model=model,
         messages=messages,
         max_tokens=max_tokens * len(urls)
     )
@@ -205,8 +208,14 @@ def post_process_summaries(summaries, topics):
         if not summary.strip():
             continue
         summary = "[http" + summary
-        url = summary.split("]")[0][1:]
-        content = summary.split("]", 1)[1].strip()
+        parts = summary.split("]", 1)
+        if len(parts) < 2:
+            # If there's no closing bracket, consider the whole text as content
+            url = "Unknown URL"
+            content = summary.strip()
+        else:
+            url = parts[0][1:]  # Remove the opening bracket
+            content = parts[1].strip()
         
         for topic in topics:
             if topic.lower() in content.lower():
@@ -215,6 +224,24 @@ def post_process_summaries(summaries, topics):
         processed_summaries.append(f"{url}\n{content}")
     
     return "\n\n".join(processed_summaries)
+
+async def get_available_models(api_key):
+    """
+    Fetch the list of available models from OpenAI.
+
+    Args:
+        api_key (str): OpenAI API key.
+
+    Returns:
+        List[str]: List of available model names.
+    """
+    client = AsyncOpenAI(api_key=api_key)
+    try:
+        models = await client.models.list()
+        return [model.id for model in models.data if model.id.startswith(("gpt-3.5", "gpt-4"))]
+    except Exception as e:
+        print(f"Error fetching models: {e}")
+        return ["gpt-3.5-turbo", "gpt-4"]  # Fallback to default models
 
 class Pipeline:
     class Valves(BaseModel):
@@ -226,10 +253,12 @@ class Pipeline:
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
         MAX_TOKENS: int = 2000  # Maximum number of tokens for each summary
         BATCH_SIZE: int = 10  # Number of URLs to process in each batch
+        MODEL: str = "gpt-3.5-turbo"  # Default model
 
     def __init__(self):
-        self.name = "Web Summary Pipeline"
+        self.name = "Efficient Web Summary Pipeline"
         self.valves = self.Valves()
+        self.available_models = []
 
     async def on_startup(self):
         """
@@ -237,6 +266,8 @@ class Pipeline:
         """
         print(f"on_startup:{__name__}")
         await setup_playwright()  # Set up Playwright in the on_startup method
+        self.available_models = await get_available_models(self.valves.OPENAI_API_KEY)
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-3.5-turbo"
 
     async def on_shutdown(self):
         """
@@ -258,28 +289,45 @@ class Pipeline:
             str: The generated summaries for the extracted URLs.
         """
         print(f"pipe:{__name__}")
-        openai_key = self.valves.OPENAI_API_KEY
-        topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
-        max_tokens = self.valves.MAX_TOKENS
-        batch_size = self.valves.BATCH_SIZE
-        
-        # Extract URLs from the unstructured text
-        urls = extract_urls(user_message)
-        
-        if not urls:
-            return "No valid URLs found in the input text."
-        
-        client = AsyncOpenAI(api_key=openai_key)
-        
-        # Process URLs in batches
-        all_summaries = []
-        
-        for i in range(0, len(urls), batch_size):
-            batch = urls[i:i+batch_size]
-            batch_summaries = asyncio.run(summarize_batch(client, batch, topics, max_tokens))
-            all_summaries.append(batch_summaries)
-        
-        combined_summaries = "\n".join(all_summaries)
-        processed_summaries = post_process_summaries(combined_summaries, topics)
-        
-        return processed_summaries
+        try:
+            openai_key = self.valves.OPENAI_API_KEY
+            topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
+            max_tokens = self.valves.MAX_TOKENS
+            batch_size = self.valves.BATCH_SIZE
+            model = self.valves.MODEL
+            
+            # Extract URLs from the unstructured text
+            urls = extract_urls(user_message)
+            
+            if not urls:
+                return "No valid URLs found in the input text."
+            
+            client = AsyncOpenAI(api_key=openai_key)
+            
+            # Process URLs in batches
+            all_summaries = []
+            
+            for i in range(0, len(urls), batch_size):
+                batch = urls[i:i+batch_size]
+                batch_summaries = asyncio.run(summarize_batch(client, batch, topics, max_tokens, model))
+                all_summaries.append(batch_summaries)
+            
+            combined_summaries = "\n".join(all_summaries)
+            processed_summaries = post_process_summaries(combined_summaries, topics)
+            
+            return processed_summaries
+        except Exception as e:
+            print(f"Error in pipe function: {e}")
+            return f"An error occurred while processing the request: {str(e)}"
+
+    def get_config(self):
+        """
+        Return the configuration options for the pipeline, including the model dropdown.
+        """
+        return {
+            "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
+            "TOPICS": {"type": "string", "value": self.valves.TOPICS},
+            "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
+            "BATCH_SIZE": {"type": "number", "value": self.valves.BATCH_SIZE},
+            "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
+        }
