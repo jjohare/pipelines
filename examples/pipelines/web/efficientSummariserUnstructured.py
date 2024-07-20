@@ -366,3 +366,6 @@ class Pipeline:
             "BATCH_SIZE": {"type": "number", "value": self.valves.BATCH_SIZE},
             "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
         }
+
+# Expose the Pipeline class
+pipeline = Pipeline()
