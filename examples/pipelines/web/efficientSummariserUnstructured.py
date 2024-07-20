@@ -33,24 +33,24 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
-def install(package):
+def install_packages(packages):
     """
-    Install the specified package using pip.
+    Install the specified packages using pip.
     This function is used to install the required dependencies within the pipeline script.
 
     Args:
-        package (str): The name of the package to install.
+        packages (List[str]): The list of packages to install.
     """
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-        print(f"Successfully installed {package}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error installing {package}: {e}")
-        sys.exit(1)
+    for package in packages:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+            print(f"Successfully installed {package}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error installing {package}: {e}")
+            sys.exit(1)
 
 # Install the required dependencies
-for package in ["requests", "playwright", "beautifulsoup4", "openai"]:
-    install(package)
+install_packages(["requests", "playwright", "beautifulsoup4", "openai"])
 
 # Install Playwright browsers and dependencies
 try:
@@ -183,7 +183,7 @@ async def summarize_batch(client, urls, topics, max_tokens, model):
         model (str): The OpenAI model to use for summarization.
 
     Returns:
-        str: The generated summaries for the batch of URLs.
+        List[str]: The generated summaries for the batch of URLs.
     """
     scraped_contents = await asyncio.gather(*[scrape_url(url) for url in urls])
     prompt = create_prompt(urls, topics, max_tokens)
@@ -205,7 +205,7 @@ async def summarize_batch(client, urls, topics, max_tokens, model):
         return response.choices[0].message.content
     except Exception as e:
         print(f"Error generating summaries: {e}")
-        return None
+        return []
 
 def post_process_summaries(summaries, topics):
     """
