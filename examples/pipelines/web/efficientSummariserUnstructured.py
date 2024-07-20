@@ -77,12 +77,13 @@ def extract_urls(text):
 
 async def setup_playwright():
     """
-    Set up Playwright by installing the required browsers.
+    Set up Playwright by launching a browser instance.
     This function is called during the pipeline startup process.
     """
     try:
         async with async_playwright() as p:
-            await p.chromium.install()
+            browser = await p.chromium.launch()
+            await browser.close()
         print("Playwright setup completed successfully")
     except Exception as e:
         print(f"Error setting up Playwright: {e}")
@@ -369,3 +370,4 @@ class Pipeline:
 
 # Expose the Pipeline class
 pipeline = Pipeline()
+print("Pipeline instance created and exposed.")
