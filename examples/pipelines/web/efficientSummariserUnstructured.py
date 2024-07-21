@@ -20,12 +20,16 @@ Usage:
 
 import re
 import sys
-import subprocess
+import logging
+import asyncio
 from typing import List
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 from openai import OpenAI
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def extract_urls(text):
     """
@@ -37,22 +41,25 @@ def extract_urls(text):
     Returns:
         List[str]: A list of extracted URLs.
     """
-    # This regex pattern matches most common URL formats and excludes trailing punctuation
+    logging.info("Extracting URLs from input text.")
     url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+(?=[.,;:!?)\]}\s]|$)'
-    return list(set(re.findall(url_pattern, text)))
+    urls = list(set(re.findall(url_pattern, text)))
+    logging.debug(f"Extracted URLs: {urls}")
+    return urls
 
-def setup_playwright():
+async def setup_playwright():
     """
     Set up Playwright by launching a browser instance.
     This function is called during the pipeline startup process.
     """
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            browser.close()
-        print("Playwright setup completed successfully")
+        logging.info("Setting up Playwright.")
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            await browser.close()
+        logging.info("Playwright setup completed successfully.")
     except Exception as e:
-        print(f"Error setting up Playwright: {e}")
+        logging.error(f"Error setting up Playwright: {e}")
         sys.exit(1)
 
 def filter_content(html_content):
@@ -65,6 +72,7 @@ def filter_content(html_content):
     Returns:
         str: Filtered and limited text content.
     """
+    logging.info("Filtering HTML content.")
     soup = BeautifulSoup(html_content, 'html.parser')
     
     # Remove scripts, styles, and other unnecessary elements
@@ -81,7 +89,9 @@ def filter_content(html_content):
     # Remove extra whitespace and limit to first 1000 words
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:1000]
-    return ' '.join(words)
+    filtered_text = ' '.join(words)
+    logging.debug(f"Filtered content: {filtered_text[:200]}...")  # Log only the first 200 characters
+    return filtered_text
 
 def create_prompt(urls, contents, topics, max_tokens):
     """
@@ -96,6 +106,7 @@ def create_prompt(urls, contents, topics, max_tokens):
     Returns:
         str: The generated prompt for the OpenAI API.
     """
+    logging.info("Creating prompt for OpenAI API.")
     topics_str = ", ".join(topics)
     prompt = (
         f"Please create concise summaries of the following web pages, unless they are 404 or similar failures. "
@@ -114,9 +125,10 @@ def create_prompt(urls, contents, topics, max_tokens):
     )
     for url, content in zip(urls, contents):
         prompt += f"[{url}]\n{content}\n\n"
+    logging.debug(f"Generated prompt: {prompt[:200]}...")  # Log only the first 200 characters
     return prompt
 
-def scrape_url(url):
+async def scrape_url(url):
     """
     Scrape the content of a given URL using Playwright.
 
@@ -126,22 +138,23 @@ def scrape_url(url):
     Returns:
         str or None: The filtered content of the web page, or None if an error occurred.
     """
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page()
+    logging.info(f"Scraping URL: {url}")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            content = page.content()
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            content = await page.content()
             filtered_content = filter_content(content)
-            print(f"Successfully scraped {url}")
+            logging.info(f"Successfully scraped {url}")
             return filtered_content
         except Exception as e:
-            print(f"Error scraping {url}: {e}")
+            logging.error(f"Error scraping {url}: {e}")
             return None
         finally:
-            browser.close()
+            await browser.close()
 
-def summarize(client, urls, topics, max_tokens):
+async def summarize(client, urls, topics, max_tokens):
     """
     Summarize a list of URLs using the OpenAI API.
 
@@ -154,7 +167,8 @@ def summarize(client, urls, topics, max_tokens):
     Returns:
         str: The generated summaries for the URLs.
     """
-    scraped_contents = [scrape_url(url) for url in urls]
+    logging.info("Starting summarization process.")
+    scraped_contents = await asyncio.gather(*[scrape_url(url) for url in urls])
     prompt = create_prompt(urls, scraped_contents, topics, max_tokens)
     
     messages = [
@@ -168,10 +182,10 @@ def summarize(client, urls, topics, max_tokens):
             messages=messages,
             max_tokens=max_tokens * len(urls)
         )
-        print(f"Successfully generated summaries for {len(urls)} URLs")
+        logging.info(f"Successfully generated summaries for {len(urls)} URLs")
         return response.choices[0].message['content']
     except Exception as e:
-        print(f"Error generating summaries: {e}")
+        logging.error(f"Error generating summaries: {e}")
         return ""
 
 def post_process_summaries(summaries, topics):
@@ -185,6 +199,7 @@ def post_process_summaries(summaries, topics):
     Returns:
         List[str]: The processed summaries with proper topic highlighting.
     """
+    logging.info("Post-processing summaries.")
     processed_summaries = []
     for summary in summaries.split("[http"):
         if not summary.strip():
@@ -204,6 +219,7 @@ def post_process_summaries(summaries, topics):
         
         processed_summaries.append(f"{url}\n{content}")
     
+    logging.debug(f"Processed summaries: {processed_summaries}")
     return processed_summaries
 
 class Pipeline:
@@ -220,22 +236,22 @@ class Pipeline:
         self.name = "Efficient Web Summary Pipeline"
         self.valves = self.Valves()
 
-    def on_startup(self):
+    async def on_startup(self):
         """
         Function called when the pipeline is started.
         """
-        print(f"Starting up {self.name}")
-        setup_playwright()  # Set up Playwright in the on_startup method
-        print(f"Startup complete.")
+        logging.info(f"Starting up {self.name}")
+        await setup_playwright()  # Set up Playwright in the on_startup method
+        logging.info("Startup complete.")
 
-    def on_shutdown(self):
+    async def on_shutdown(self):
         """
         Function called when the pipeline is shut down.
         """
-        print(f"Shutting down {self.name}")
+        logging.info(f"Shutting down {self.name}")
 
-    def pipe(self, user_message: str) -> str:
-        print(f"Processing input in {self.name}")
+    async def pipe(self, user_message: str) -> str:
+        logging.info(f"Processing input in {self.name}")
         try:
             openai_key = self.valves.OPENAI_API_KEY
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
@@ -244,31 +260,31 @@ class Pipeline:
             urls = extract_urls(user_message)
             
             if not urls:
-                print("No valid URLs found in the input text.")
+                logging.warning("No valid URLs found in the input text.")
                 return "No valid URLs found in the input text."
             
-            print(f"Found {len(urls)} URLs to process")
+            logging.info(f"Found {len(urls)} URLs to process")
             client = OpenAI(api_key=openai_key)
             
-            all_summaries = summarize(client, urls, topics, max_tokens)
+            all_summaries = await summarize(client, urls, topics, max_tokens)
             if all_summaries:
                 processed_summaries = post_process_summaries(all_summaries, topics)
                 result = user_message
                 for url, summary in zip(urls, processed_summaries):
                     if "404 error" in summary.lower() or "not available" in summary.lower():
-                        print(f"Skipping summary for unavailable page: {url}")
+                        logging.info(f"Skipping summary for unavailable page: {url}")
                         continue
                     
                     summary_text = f"\n\n### Web Summary - Auto Generated\n{summary}\n"
                     result = result.replace(url, f"{url}{summary_text}")
                 
-                print("Processing complete. Returning result.")
+                logging.info("Processing complete. Returning result.")
                 return result
             else:
-                print("Failed to generate summaries.")
+                logging.warning("Failed to generate summaries.")
                 return "Failed to generate summaries."
         except Exception as e:
-            print(f"Error in pipe function: {e}")
+            logging.error(f"Error in pipe function: {e}")
             return f"An error occurred while processing the request: {str(e)}"
 
     def get_config(self):
@@ -283,4 +299,4 @@ class Pipeline:
 
 # Expose the Pipeline class
 pipeline = Pipeline()
-print("Pipeline instance created and exposed.")
+logging.info("Pipeline instance created and exposed.")
