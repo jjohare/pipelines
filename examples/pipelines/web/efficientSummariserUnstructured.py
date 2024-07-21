@@ -250,7 +250,7 @@ class Pipeline:
         """
         logging.info(f"Shutting down {self.name}")
 
-    async def pipe(self, user_message: str) -> str:
+    async def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         logging.info(f"Processing input in {self.name}")
         try:
             openai_key = self.valves.OPENAI_API_KEY
