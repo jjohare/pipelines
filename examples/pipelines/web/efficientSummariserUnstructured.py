@@ -26,11 +26,10 @@ Usage:
 import re
 import sys
 import subprocess
-import asyncio
-from typing import List, Union, Generator, Iterator
+from typing import List
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 from openai import AsyncOpenAI
 
 def extract_urls(text):
@@ -43,19 +42,22 @@ def extract_urls(text):
     Returns:
         List[str]: A list of extracted URLs.
     """
-    # This regex pattern matches most common URL formats and excludes trailing punctuation
+    print("Extracting URLs from text...")
     url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+(?=[.,;:!?)\]}\s]|$)'
-    return list(set(re.findall(url_pattern, text)))
+    urls = list(set(re.findall(url_pattern, text)))
+    print(f"Extracted URLs: {urls}")
+    return urls
 
-async def setup_playwright():
+def setup_playwright():
     """
     Set up Playwright by launching a browser instance.
     This function is called during the pipeline startup process.
     """
+    print("Setting up Playwright...")
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch()
-            await browser.close()
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            browser.close()
         print("Playwright setup completed successfully")
     except Exception as e:
         print(f"Error setting up Playwright: {e}")
@@ -71,23 +73,23 @@ def filter_content(html_content):
     Returns:
         str: Filtered and limited text content.
     """
+    print("Filtering content from HTML...")
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # Remove scripts, styles, and other unnecessary elements
     for element in soup(['script', 'style', 'nav', 'footer', 'header']):
         element.decompose()
     
-    # Extract main content (adjust selectors based on common website structures)
     main_content = soup.select_one('main, #content, .main-content, article')
     if main_content:
         text = main_content.get_text(separator=' ', strip=True)
     else:
         text = soup.get_text(separator=' ', strip=True)
     
-    # Remove extra whitespace and limit to first 1000 words
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:1000]
-    return ' '.join(words)
+    filtered_text = ' '.join(words)
+    print(f"Filtered content: {filtered_text[:200]}... (truncated)")
+    return filtered_text
 
 def create_prompt(urls, contents, topics, max_tokens):
     """
@@ -102,6 +104,7 @@ def create_prompt(urls, contents, topics, max_tokens):
     Returns:
         str: The generated prompt for the OpenAI API.
     """
+    print("Creating prompt for OpenAI API...")
     topics_str = ", ".join(topics)
     prompt = (
         f"Please create concise summaries of the following web pages, unless they are 404 or similar failures. "
@@ -120,9 +123,10 @@ def create_prompt(urls, contents, topics, max_tokens):
     )
     for url, content in zip(urls, contents):
         prompt += f"[{url}]\n{content}\n\n"
+    print(f"Generated prompt: {prompt[:500]}... (truncated)")
     return prompt
 
-async def scrape_url(url):
+def scrape_url(url):
     """
     Scrape the content of a given URL using Playwright.
 
@@ -132,12 +136,13 @@ async def scrape_url(url):
     Returns:
         str or None: The filtered content of the web page, or None if an error occurred.
     """
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
+    print(f"Scraping URL: {url}")
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            content = await page.content()
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            content = page.content()
             filtered_content = filter_content(content)
             print(f"Successfully scraped {url}")
             return filtered_content
@@ -145,7 +150,7 @@ async def scrape_url(url):
             print(f"Error scraping {url}: {e}")
             return None
         finally:
-            await browser.close()
+            browser.close()
 
 async def summarize_batch(client, urls, topics, max_tokens, model):
     """
@@ -161,7 +166,8 @@ async def summarize_batch(client, urls, topics, max_tokens, model):
     Returns:
         str: The generated summaries for the batch of URLs.
     """
-    scraped_contents = await asyncio.gather(*[scrape_url(url) for url in urls])
+    print(f"Summarizing batch of {len(urls)} URLs...")
+    scraped_contents = [scrape_url(url) for url in urls]
     prompt = create_prompt(urls, scraped_contents, topics, max_tokens)
     
     messages = [
@@ -175,8 +181,9 @@ async def summarize_batch(client, urls, topics, max_tokens, model):
             messages=messages,
             max_tokens=max_tokens * len(urls)
         )
-        print(f"Successfully generated summaries for batch of {len(urls)} URLs")
-        return response.choices[0].message['content']
+        summaries = response.choices[0].message['content']
+        print(f"Successfully generated summaries: {summaries[:500]}... (truncated)")
+        return summaries
     except Exception as e:
         print(f"Error generating summaries: {e}")
         return ""
@@ -192,6 +199,7 @@ def post_process_summaries(summaries, topics):
     Returns:
         List[str]: The processed summaries with proper topic highlighting.
     """
+    print("Post-processing summaries...")
     processed_summaries = []
     for summary in summaries.split("[http"):
         if not summary.strip():
@@ -210,7 +218,7 @@ def post_process_summaries(summaries, topics):
                 content = re.sub(r'\b{}\b'.format(re.escape(topic)), r'[[{}]]'.format(topic), content, count=1, flags=re.IGNORECASE)
         
         processed_summaries.append(f"{url}\n{content}")
-    
+    print(f"Processed summaries: {processed_summaries}")
     return processed_summaries
 
 async def get_available_models(api_key):
@@ -223,6 +231,7 @@ async def get_available_models(api_key):
     Returns:
         List[str]: List of available model names.
     """
+    print("Fetching available models from OpenAI...")
     client = AsyncOpenAI(api_key=api_key)
     try:
         models = await client.models.list()
@@ -255,7 +264,7 @@ class Pipeline:
         Async function called when the pipeline is started.
         """
         print(f"Starting up {self.name}")
-        await setup_playwright()  # Set up Playwright in the on_startup method
+        setup_playwright()  # Set up Playwright in the on_startup method
         self.available_models = await get_available_models(self.valves.OPENAI_API_KEY)
         self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-3.5-turbo"
         print(f"Startup complete. Using model: {self.valves.MODEL}")
@@ -275,6 +284,7 @@ class Pipeline:
             batch_size = self.valves.BATCH_SIZE
             model = self.valves.MODEL
             
+            print("Extracting URLs from user message...")
             urls = extract_urls(user_message)
             
             if not urls:
@@ -317,6 +327,7 @@ class Pipeline:
         """
         Return the configuration options for the pipeline, including the model dropdown.
         """
+        print("Getting configuration options...")
         return {
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
             "TOPICS": {"type": "string", "value": self.valves.TOPICS},
