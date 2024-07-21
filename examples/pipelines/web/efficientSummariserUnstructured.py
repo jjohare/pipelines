@@ -21,11 +21,10 @@ Usage:
 import re
 import sys
 import logging
-import asyncio
 from typing import List
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 from openai import OpenAI
 
 # Set up logging
@@ -47,16 +46,16 @@ def extract_urls(text):
     logging.debug(f"Extracted URLs: {urls}")
     return urls
 
-async def setup_playwright():
+def setup_playwright():
     """
     Set up Playwright by launching a browser instance.
     This function is called during the pipeline startup process.
     """
     try:
         logging.info("Setting up Playwright.")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch()
-            await browser.close()
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            browser.close()
         logging.info("Playwright setup completed successfully.")
     except Exception as e:
         logging.error(f"Error setting up Playwright: {e}")
@@ -128,7 +127,7 @@ def create_prompt(urls, contents, topics, max_tokens):
     logging.debug(f"Generated prompt: {prompt[:200]}...")  # Log only the first 200 characters
     return prompt
 
-async def scrape_url(url):
+def scrape_url(url):
     """
     Scrape the content of a given URL using Playwright.
 
@@ -139,12 +138,12 @@ async def scrape_url(url):
         str or None: The filtered content of the web page, or None if an error occurred.
     """
     logging.info(f"Scraping URL: {url}")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            content = await page.content()
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            content = page.content()
             filtered_content = filter_content(content)
             logging.info(f"Successfully scraped {url}")
             return filtered_content
@@ -152,9 +151,9 @@ async def scrape_url(url):
             logging.error(f"Error scraping {url}: {e}")
             return None
         finally:
-            await browser.close()
+            browser.close()
 
-async def summarize(client, urls, topics, max_tokens):
+def summarize(client, urls, topics, max_tokens):
     """
     Summarize a list of URLs using the OpenAI API.
 
@@ -168,7 +167,7 @@ async def summarize(client, urls, topics, max_tokens):
         str: The generated summaries for the URLs.
     """
     logging.info("Starting summarization process.")
-    scraped_contents = await asyncio.gather(*[scrape_url(url) for url in urls])
+    scraped_contents = [scrape_url(url) for url in urls]
     prompt = create_prompt(urls, scraped_contents, topics, max_tokens)
     
     messages = [
@@ -236,15 +235,15 @@ class Pipeline:
         self.name = "Efficient Web Summary Pipeline"
         self.valves = self.Valves()
 
-    async def on_startup(self):
+    def on_startup(self):
         """
         Function called when the pipeline is started.
         """
         logging.info(f"Starting up {self.name}")
-        await setup_playwright()  # Set up Playwright in the on_startup method
+        setup_playwright()  # Set up Playwright in the on_startup method
         logging.info("Startup complete.")
 
-    async def on_shutdown(self):
+    def on_shutdown(self):
         """
         Function called when the pipeline is shut down.
         """
@@ -266,8 +265,7 @@ class Pipeline:
             logging.info(f"Found {len(urls)} URLs to process")
             client = OpenAI(api_key=openai_key)
             
-            loop = asyncio.get_event_loop()
-            all_summaries = loop.run_until_complete(summarize(client, urls, topics, max_tokens))
+            all_summaries = summarize(client, urls, topics, max_tokens)
             if all_summaries:
                 processed_summaries = post_process_summaries(all_summaries, topics)
                 result = user_message
