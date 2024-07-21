@@ -351,7 +351,7 @@ class Pipeline:
             return result
         except Exception as e:
             logger.error(f"Error in pipe function: {e}")
-            return f"An error occurred while processing the request:
+            return f"An error occurred while processing the request: {str(e)}"
 
     def get_config(self):
         logger.info("Retrieving pipeline configuration.")
