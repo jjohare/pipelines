@@ -250,7 +250,7 @@ class Pipeline:
         """
         logging.info(f"Shutting down {self.name}")
 
-    async def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
+    def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         logging.info(f"Processing input in {self.name}")
         try:
             openai_key = self.valves.OPENAI_API_KEY
@@ -266,7 +266,8 @@ class Pipeline:
             logging.info(f"Found {len(urls)} URLs to process")
             client = OpenAI(api_key=openai_key)
             
-            all_summaries = await summarize(client, urls, topics, max_tokens)
+            loop = asyncio.get_event_loop()
+            all_summaries = loop.run_until_complete(summarize(client, urls, topics, max_tokens))
             if all_summaries:
                 processed_summaries = post_process_summaries(all_summaries, topics)
                 result = user_message
