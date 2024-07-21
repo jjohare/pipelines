@@ -33,34 +33,6 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
-def install_packages(packages):
-    """
-    Install the specified packages using pip.
-    This function is used to install the required dependencies within the pipeline script.
-
-    Args:
-        packages (List[str]): The list of packages to install.
-    """
-    for package in packages:
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-            print(f"Successfully installed {package}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error installing {package}: {e}")
-            sys.exit(1)
-
-# Install the required dependencies
-install_packages(["requests", "playwright", "beautifulsoup4", "openai"])
-
-# Install Playwright browsers and dependencies
-try:
-    subprocess.run(["playwright", "install"], check=True)
-    subprocess.run(["playwright", "install-deps"], check=True)
-    print("Playwright and dependencies installed successfully")
-except subprocess.CalledProcessError as e:
-    print(f"Error installing Playwright: {e}")
-    sys.exit(1)
-
 def extract_urls(text):
     """
     Extract URLs from unstructured text using regex.
@@ -117,12 +89,13 @@ def filter_content(html_content):
     words = text.split()[:1000]
     return ' '.join(words)
 
-def create_prompt(urls, topics, max_tokens):
+def create_prompt(urls, contents, topics, max_tokens):
     """
     Create a prompt for generating summaries of the specified URLs considering the given topics.
 
     Args:
         urls (List[str]): List of URLs to summarize.
+        contents (List[str]): List of corresponding contents from the scraped URLs.
         topics (List[str]): List of topics to consider in the summaries.
         max_tokens (int): Maximum number of tokens for each summary.
 
@@ -143,8 +116,10 @@ def create_prompt(urls, topics, max_tokens):
         f"  - If a web page is inaccessible, mention that instead of providing a summary.\n"
         f"- Keep each summary to approximately {max_tokens} tokens.\n\n"
         f"List of topics to consider: {topics_str}\n\n"
-        f"Web pages to summarize:\n" + "\n".join(urls)
+        f"Web pages to summarize:\n"
     )
+    for url, content in zip(urls, contents):
+        prompt += f"[{url}]\n{content}\n\n"
     return prompt
 
 async def scrape_url(url):
@@ -184,29 +159,27 @@ async def summarize_batch(client, urls, topics, max_tokens, model):
         model (str): The OpenAI model to use for summarization.
 
     Returns:
-        List[str]: The generated summaries for the batch of URLs.
+        str: The generated summaries for the batch of URLs.
     """
     scraped_contents = await asyncio.gather(*[scrape_url(url) for url in urls])
-    prompt = create_prompt(urls, topics, max_tokens)
+    prompt = create_prompt(urls, scraped_contents, topics, max_tokens)
     
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages."},
         {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web pages and highlight relevant topics as requested."},
-        {"role": "user", "content": "Here are the contents of the web pages:\n\n" + "\n\n".join([f"[{url}]\n{content}" for url, content in zip(urls, scraped_contents) if content])}
     ]
     
     try:
-        response = await client.chat.completions.create(
+        response = await client.chat_completions.create(
             model=model,
             messages=messages,
             max_tokens=max_tokens * len(urls)
         )
         print(f"Successfully generated summaries for batch of {len(urls)} URLs")
-        return response.choices[0].message.content
+        return response.choices[0].message['content']
     except Exception as e:
         print(f"Error generating summaries: {e}")
-        return []
+        return ""
 
 def post_process_summaries(summaries, topics):
     """
@@ -293,19 +266,7 @@ class Pipeline:
         """
         print(f"Shutting down {self.name}")
 
-    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
-        """
-        Main pipeline function that processes the user input, extracts URLs, and generates summaries.
-
-        Args:
-            user_message (str): The user's input message containing unstructured text with URLs.
-            model_id (str): The ID of the model to use (not used in this implementation).
-            messages (List[dict]): Previous messages in the conversation (not used in this implementation).
-            body (dict): Additional request body information (not used in this implementation).
-
-        Returns:
-            str: The original text with integrated summaries for the extracted URLs.
-        """
+    async def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> str:
         print(f"Processing input in {self.name}")
         try:
             openai_key = self.valves.OPENAI_API_KEY
@@ -314,7 +275,6 @@ class Pipeline:
             batch_size = self.valves.BATCH_SIZE
             model = self.valves.MODEL
             
-            # Extract URLs from the unstructured text
             urls = extract_urls(user_message)
             
             if not urls:
@@ -324,13 +284,12 @@ class Pipeline:
             print(f"Found {len(urls)} URLs to process")
             client = AsyncOpenAI(api_key=openai_key)
             
-            # Process URLs in batches
             all_summaries = {}
             
             for i in range(0, len(urls), batch_size):
                 batch = urls[i:i+batch_size]
                 print(f"Processing batch {i//batch_size + 1} of {len(urls)//batch_size + 1}")
-                batch_summaries = asyncio.run(summarize_batch(client, batch, topics, max_tokens, model))
+                batch_summaries = await summarize_batch(client, batch, topics, max_tokens, model)
                 if batch_summaries:
                     processed_batch_summaries = post_process_summaries(batch_summaries, topics)
                     
@@ -339,11 +298,9 @@ class Pipeline:
                 else:
                     print(f"Failed to generate summaries for batch {i//batch_size + 1}")
             
-            # Integrate summaries back into the original text
             result = user_message
             for url, summary in all_summaries.items():
                 if "404 error" in summary.lower() or "not available" in summary.lower():
-                    # If it's a 404 or unavailable, keep the original URL
                     print(f"Skipping summary for unavailable page: {url}")
                     continue
                 
