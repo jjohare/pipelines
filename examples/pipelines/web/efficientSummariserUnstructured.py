@@ -25,7 +25,7 @@ from typing import List
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
-from openai import OpenAI
+import openai
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,22 +74,19 @@ def filter_content(html_content):
     logging.info("Filtering HTML content.")
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # Remove scripts, styles, and other unnecessary elements
     for element in soup(['script', 'style', 'nav', 'footer', 'header']):
         element.decompose()
     
-    # Extract main content (adjust selectors based on common website structures)
     main_content = soup.select_one('main, #content, .main-content, article')
     if main_content:
         text = main_content.get_text(separator=' ', strip=True)
     else:
         text = soup.get_text(separator=' ', strip=True)
     
-    # Remove extra whitespace and limit to first 1000 words
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:1000]
     filtered_text = ' '.join(words)
-    logging.debug(f"Filtered content: {filtered_text[:200]}...")  # Log only the first 200 characters
+    logging.debug(f"Filtered content: {filtered_text[:200]}...")
     return filtered_text
 
 def create_prompt(urls, contents, topics, max_tokens):
@@ -124,7 +121,7 @@ def create_prompt(urls, contents, topics, max_tokens):
     )
     for url, content in zip(urls, contents):
         prompt += f"[{url}]\n{content}\n\n"
-    logging.debug(f"Generated prompt: {prompt[:200]}...")  # Log only the first 200 characters
+    logging.debug(f"Generated prompt: {prompt[:200]}...")
     return prompt
 
 def scrape_url(url):
@@ -176,8 +173,8 @@ def summarize(client, urls, topics, max_tokens):
     ]
     
     try:
-        response = client.chat_completions.create(
-            model="gpt-4o-mini",
+        response = client.Completions.create(
+            model="gpt-3.5-turbo",
             messages=messages,
             max_tokens=max_tokens * len(urls)
         )
@@ -240,7 +237,7 @@ class Pipeline:
         Function called when the pipeline is started.
         """
         logging.info(f"Starting up {self.name}")
-        setup_playwright()  # Set up Playwright in the on_startup method
+        setup_playwright()
         logging.info("Startup complete.")
 
     def on_shutdown(self):
@@ -252,7 +249,7 @@ class Pipeline:
     def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         logging.info(f"Processing input in {self.name}")
         try:
-            openai_key = self.valves.OPENAI_API_KEY
+            openai.api_key = self.valves.OPENAI_API_KEY
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
             max_tokens = self.valves.MAX_TOKENS
             
@@ -263,9 +260,8 @@ class Pipeline:
                 return "No valid URLs found in the input text."
             
             logging.info(f"Found {len(urls)} URLs to process")
-            client = OpenAI(api_key=openai_key)
             
-            all_summaries = summarize(client, urls, topics, max_tokens)
+            all_summaries = summarize(openai, urls, topics, max_tokens)
             if all_summaries:
                 processed_summaries = post_process_summaries(all_summaries, topics)
                 result = user_message
@@ -297,5 +293,6 @@ class Pipeline:
         }
 
 # Expose the Pipeline class
-pipeline = Pipeline()
+pipeline_instance = Pipeline()
+pipeline_instance.on_startup()
 logging.info("Pipeline instance created and exposed.")
