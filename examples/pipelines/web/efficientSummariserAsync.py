@@ -6,6 +6,9 @@ Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
 and generate summaries of web pages using the OpenAI API.
 
+it is pulled with the following command
+docker run -d -p 9099:9099 --add-host=host.docker.internal:host-gateway -e PIPELINES_URLS="https://raw.githubusercontent.com/jjohare/pipelines/main/examples/pipelines/web/efficientSummariserAsync.py" -v pipelines:/app/pipelines --name pipelines --restart always ghcr.io/open-webui/pipelines:main
+
 Key features:
 - URL extraction from unstructured text using regex
 - Efficient web scraping using Playwright (Async API)
@@ -306,7 +309,7 @@ class Pipeline:
         client = AsyncOpenAI(api_key=api_key)
         try:
             models = await client.models.list()
-            available_models = [model.id for model in models.data if model.id.startswith(("gpt-3.5", "gpt-4"))]
+            available_models = [model.id for model in models.data if model.id.startswith(("gpt-4o-mini", "gpt-4"))]
             logger.info(f"Available models: {available_models}")
             return available_models
         except Exception as e:
@@ -320,7 +323,7 @@ class Pipeline:
         logger.info(f"Starting up {self.name}")
         await self.setup_playwright()
         self.available_models = await self.get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-3.5-turbo"
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
         logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
 
     async def on_shutdown(self):
