@@ -146,9 +146,9 @@ class Pipeline:
         """
         OPENAI_API_KEY: str = ""  # OpenAI API key
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
-        MAX_TOKENS: int = 2000  # Maximum number of tokens for each summary
-        BATCH_SIZE: int = 10  # Number of URLs to process in each batch
-        MODEL: str = "gpt-3.5-turbo"  # Default model
+        MAX_TOKENS: int = 16000  # Maximum number of tokens for each summary
+        BATCH_SIZE: int = 1  # Number of URLs to process in each batch
+        MODEL: str = "gpt-4o-mini"  # Default model
 
     def __init__(self):
         self.name = "Efficient Web Summary Pipeline"
@@ -300,7 +300,7 @@ class Pipeline:
             return available_models
         except Exception as e:
             logger.error(f"Error fetching models: {e}")
-            return ["gpt-3.5-turbo", "gpt-4"]  # Fallback to default models
+            return ["gpt-4o-mini", "gpt-4"]  # Fallback to default models
 
     async def on_startup(self):
         """
