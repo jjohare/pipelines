@@ -50,10 +50,30 @@ def check_and_install(package):
         logger.info(f"{package} not found, installing...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
+def install_system_dependencies():
+    """
+    Install system dependencies required for Playwright.
+    """
+    logger.info("Installing system dependencies for Playwright...")
+    try:
+        subprocess.check_call(["apt-get", "update"])
+        subprocess.check_call([
+            "apt-get", "install", "-y",
+            "libglib2.0-0", "libnss3", "libnspr4", "libdbus-1-3", "libatk1.0-0",
+            "libatk-bridge2.0-0", "libcups2", "libdrm2", "libatspi2.0-0",
+            "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1",
+            "libxkbcommon0", "libpango-1.0-0", "libcairo2", "libasound2"
+        ])
+        logger.info("System dependencies installed successfully.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to install system dependencies: {e}")
+        raise RuntimeError("Failed to install system dependencies. The pipeline may not function correctly.")
+
 def install_dependencies():
     """
     Install required dependencies.
     """
+    install_system_dependencies()  # Add this line
     dependencies = ['playwright', 'beautifulsoup4', 'openai', 'requests']
     for package in dependencies:
         check_and_install(package)
@@ -61,7 +81,7 @@ def install_dependencies():
     # Additional step for Playwright specific post-installation
     try:
         from playwright.async_api import async_playwright
-        subprocess.check_call(['playwright', 'install', 'chromium'])
+        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
     except Exception as e:
         logger.error(f"Failed to complete playwright installation: {e}")
         raise
@@ -187,7 +207,18 @@ class Pipeline:
             logger.info("Playwright setup successful.")
         except Exception as e:
             logger.error(f"Playwright setup failed: {e}")
-            raise RuntimeError("Playwright setup failed. The pipeline may not function correctly.")
+            logger.info("Attempting to install system dependencies and retry...")
+            install_system_dependencies()
+            try:
+                self.playwright = await async_playwright().start()
+                self.browser = await self.playwright.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                )
+                logger.info("Playwright setup successful after installing dependencies.")
+            except Exception as e:
+                logger.error(f"Playwright setup failed again: {e}")
+                raise RuntimeError("Playwright setup failed. The pipeline may not function correctly.")
 
     async def teardown_playwright(self):
         """
