@@ -6,9 +6,6 @@ Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
 and generate summaries of web pages using the OpenAI API.
 
-it is pulled with the following command
-docker run -d -p 9099:9099 --add-host=host.docker.internal:host-gateway -e PIPELINES_URLS="https://raw.githubusercontent.com/jjohare/pipelines/main/examples/pipelines/web/efficientSummariserAsync.py" -v pipelines:/app/pipelines --name pipelines --restart always ghcr.io/open-webui/pipelines:main
-
 Key features:
 - URL extraction from unstructured text using regex
 - Efficient web scraping using Playwright (Async API)
@@ -18,6 +15,7 @@ Key features:
 - Customizable summary length and batch size
 - Model selection from available OpenAI models
 - Integration of summaries back into the original text
+- Dynamic dependency installation
 
 Usage:
 1. Set the OPENAI_API_KEY in the Valves configuration.
@@ -33,6 +31,7 @@ import sys
 import logging
 import asyncio
 import subprocess
+import importlib
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
 
@@ -40,26 +39,31 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def check_and_install(package):
+    """
+    Check if a Python package is installed. If not, install it.
+    """
+    try:
+        importlib.import_module(package)
+        logger.info(f"{package} is already installed.")
+    except ImportError:
+        logger.info(f"{package} not found, installing...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
 def install_dependencies():
     """
-    Check for and install required dependencies.
+    Install required dependencies.
     """
-    try:
-        import playwright
-        import requests
-        import bs4
-        import openai
-    except ImportError:
-        logger.info("Installing required dependencies...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright", "requests", "beautifulsoup4", "openai"])
-        logger.info("Dependencies installed successfully.")
+    dependencies = ['playwright', 'beautifulsoup4', 'openai', 'requests']
+    for package in dependencies:
+        check_and_install(package)
 
-    # Install Playwright browser
+    # Additional step for Playwright specific post-installation
     try:
-        subprocess.check_call(["playwright", "install", "chromium"])
-        logger.info("Playwright chromium browser installed successfully.")
-    except subprocess.CalledProcessError:
-        logger.error("Failed to install Playwright chromium browser.")
+        from playwright.async_api import async_playwright
+        subprocess.check_call(['playwright', 'install', 'chromium'])
+    except Exception as e:
+        logger.error(f"Failed to complete playwright installation: {e}")
         raise
 
 # Run the installation function
@@ -211,8 +215,8 @@ class Pipeline:
             raise RuntimeError("Playwright browser not initialized.")
 
         logger.info(f"Scraping URL: {url}")
-        page = await self.browser.new_page()
         try:
+            page = await self.browser.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             content = await page.content()
             filtered_content = filter_content(content)
@@ -222,7 +226,8 @@ class Pipeline:
             logger.error(f"Error scraping {url}: {e}")
             return f"Error scraping content: {str(e)}"
         finally:
-            await page.close()
+            if page:
+                await page.close()
 
     async def summarize_batch(self, client: AsyncOpenAI, urls: List[str], topics: List[str], max_tokens: int, model: str) -> str:
         """
