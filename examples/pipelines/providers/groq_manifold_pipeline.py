@@ -1,52 +1,35 @@
-"""
-title: LiteLLM Manifold Pipeline
-author: open-webui
-date: 2024-05-30
-version: 1.0
-license: MIT
-description: A manifold pipeline that uses LiteLLM.
-"""
-
 from typing import List, Union, Generator, Iterator
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
-import requests
+
 import os
+import requests
 
 
 class Pipeline:
-
     class Valves(BaseModel):
-        LITELLM_BASE_URL: str = ""
-        LITELLM_API_KEY: str = ""
-        LITELLM_PIPELINE_DEBUG: bool = False
+        GROQ_API_BASE_URL: str = "https://api.groq.com/openai/v1"
+        GROQ_API_KEY: str = ""
+        pass
 
     def __init__(self):
-        # You can also set the pipelines that are available in this pipeline.
-        # Set manifold to True if you want to use this pipeline as a manifold.
-        # Manifold pipelines can have multiple pipelines.
         self.type = "manifold"
-
         # Optionally, you can set the id and name of the pipeline.
         # Best practice is to not specify the id so that it can be automatically inferred from the filename, so that users can install multiple versions of the same pipeline.
         # The identifier must be unique across all pipelines.
         # The identifier must be an alphanumeric string that can include underscores or hyphens. It cannot contain spaces, special characters, slashes, or backslashes.
-        # self.id = "litellm_manifold"
+        self.id = "groq"
+        self.name = "Groq: "
 
-        # Optionally, you can set the name of the manifold pipeline.
-        self.name = "LiteLLM: "
-
-        # Initialize rate limits
         self.valves = self.Valves(
             **{
-                "LITELLM_BASE_URL": os.getenv(
-                    "LITELLM_BASE_URL", "http://localhost:4001"
-                ),
-                "LITELLM_API_KEY": os.getenv("LITELLM_API_KEY", "your-api-key-here"),
-                "LITELLM_PIPELINE_DEBUG": os.getenv("LITELLM_PIPELINE_DEBUG", False),
+                "GROQ_API_KEY": os.getenv(
+                    "GROQ_API_KEY", "your-groq-api-key-here"
+                )
             }
         )
-        self.pipelines = []
+
+        self.pipelines = self.get_models()
         pass
 
     async def on_startup(self):
@@ -61,21 +44,21 @@ class Pipeline:
 
     async def on_valves_updated(self):
         # This function is called when the valves are updated.
-
-        self.pipelines = self.get_litellm_models()
+        print(f"on_valves_updated:{__name__}")
+        self.pipelines = self.get_models()
         pass
 
-    def get_litellm_models(self):
-
-        headers = {}
-        if self.valves.LITELLM_API_KEY:
-            headers["Authorization"] = f"Bearer {self.valves.LITELLM_API_KEY}"
-
-        if self.valves.LITELLM_BASE_URL:
+    def get_models(self):
+        if self.valves.GROQ_API_KEY:
             try:
+                headers = {}
+                headers["Authorization"] = f"Bearer {self.valves.GROQ_API_KEY}"
+                headers["Content-Type"] = "application/json"
+
                 r = requests.get(
-                    f"{self.valves.LITELLM_BASE_URL}/v1/models", headers=headers
+                    f"{self.valves.GROQ_API_BASE_URL}/models", headers=headers
                 )
+
                 models = r.json()
                 return [
                     {
@@ -84,12 +67,14 @@ class Pipeline:
                     }
                     for model in models["data"]
                 ]
+
             except Exception as e:
+
                 print(f"Error: {e}")
                 return [
                     {
                         "id": "error",
-                        "name": "Could not fetch models from LiteLLM, please update the URL in the valves.",
+                        "name": "Could not fetch models from Groq, please update the API Key in the valves.",
                     },
                 ]
         else:
@@ -98,24 +83,30 @@ class Pipeline:
     def pipe(
         self, user_message: str, model_id: str, messages: List[dict], body: dict
     ) -> Union[str, Generator, Iterator]:
-        if "user" in body:
-            print("######################################")
-            print(f'# User: {body["user"]["name"]} ({body["user"]["id"]})')
-            print(f"# Message: {user_message}")
-            print("######################################")
+        # This is where you can add your custom pipelines like RAG.
+        print(f"pipe:{__name__}")
+
+        print(messages)
+        print(user_message)
 
         headers = {}
-        if self.valves.LITELLM_API_KEY:
-            headers["Authorization"] = f"Bearer {self.valves.LITELLM_API_KEY}"
+        headers["Authorization"] = f"Bearer {self.valves.GROQ_API_KEY}"
+        headers["Content-Type"] = "application/json"
+
+        payload = {**body, "model": model_id}
+
+        if "user" in payload:
+            del payload["user"]
+        if "chat_id" in payload:
+            del payload["chat_id"]
+        if "title" in payload:
+            del payload["title"]
+
+        print(payload)
 
         try:
-            payload = {**body, "model": model_id, "user": body["user"]["id"]}
-            payload.pop("chat_id", None)
-            payload.pop("user", None)
-            payload.pop("title", None)
-
             r = requests.post(
-                url=f"{self.valves.LITELLM_BASE_URL}/v1/chat/completions",
+                url=f"{self.valves.GROQ_API_BASE_URL}/chat/completions",
                 json=payload,
                 headers=headers,
                 stream=True,
