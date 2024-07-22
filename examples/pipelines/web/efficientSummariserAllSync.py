@@ -1,4 +1,6 @@
 """
+efficientSummariserAsync.py
+
 Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 
 This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
@@ -6,7 +8,7 @@ and generate summaries of web pages using the OpenAI API.
 
 Key features:
 - URL extraction from unstructured text using regex
-- Efficient web scraping using Playwright (Async API)
+- Efficient web scraping using Playwright (Async API) in a headless environment
 - Content filtering to reduce irrelevant data
 - Batched processing of URLs
 - Topic highlighting in summaries
@@ -27,15 +29,43 @@ import re
 import sys
 import logging
 import asyncio
+import subprocess
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+def check_and_install_playwright():
+    """
+    Check if Playwright is installed and install it if it's not present.
+    This function is called only once when the script is first run.
+    """
+    try:
+        import playwright
+        logger.info("Playwright is already installed.")
+    except ImportError:
+        logger.warning("Playwright not found. Installing...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
+        logger.info("Playwright installed successfully.")
+    
+    # Always attempt to install browsers, as they might be missing even if Playwright is installed
+    logger.info("Ensuring Playwright browsers are installed...")
+    try:
+        subprocess.check_call(["playwright", "install", "chromium"])
+        logger.info("Playwright browsers installed/updated successfully.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to install Playwright browsers: {e}")
+        # Don't exit here, as the browsers might already be installed
+
+# Run the check and install function
+check_and_install_playwright()
+
+# Now we can safely import from playwright
+from playwright.async_api import async_playwright
 
 def extract_urls(text: str) -> List[str]:
     """
@@ -143,11 +173,30 @@ class Pipeline:
         try:
             logger.info("Setting up Playwright.")
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch()
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
             logger.info("Playwright setup successful.")
         except Exception as e:
             logger.error(f"Playwright setup failed: {e}")
-            raise RuntimeError("Playwright setup failed. The pipeline may not function correctly.")
+            # If the error suggests browsers need to be installed, attempt to install them
+            if "Please run the following command to download new browsers" in str(e):
+                logger.info("Attempting to install Playwright browsers...")
+                try:
+                    subprocess.run(["playwright", "install", "chromium"], check=True)
+                    logger.info("Playwright browsers installed successfully.")
+                    # Try launching the browser again
+                    self.browser = await self.playwright.chromium.launch(
+                        headless=True,
+                        args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                    )
+                    logger.info("Playwright setup successful after browser installation.")
+                except subprocess.CalledProcessError as install_error:
+                    logger.error(f"Failed to install Playwright browsers: {install_error}")
+                    raise RuntimeError("Playwright setup failed. Unable to install browsers.")
+            else:
+                raise RuntimeError("Playwright setup failed. The pipeline may not function correctly.")
 
     async def teardown_playwright(self):
         """
@@ -311,6 +360,7 @@ class Pipeline:
             str: The original text with integrated summaries for the extracted URLs.
         """
         logger.info(f"Processing input in {self.name}")
+        
         try:
             openai_key = self.valves.OPENAI_API_KEY
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
@@ -351,9 +401,12 @@ class Pipeline:
             return result
         except Exception as e:
             logger.error(f"Error in pipe function: {e}")
-            return f"An error occurred while processing the request:
+            return f"An error occurred while processing the request: {str(e)}"
 
     def get_config(self):
+        """
+        Return the configuration options for the pipeline, including the model dropdown.
+        """
         logger.info("Retrieving pipeline configuration.")
         return {
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
