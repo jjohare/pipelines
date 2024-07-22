@@ -1,4 +1,6 @@
 """
+efficientSummariserAsync.py
+
 Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 
 This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
@@ -31,43 +33,31 @@ import subprocess
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def install_package(package: str):
-    """
-    Install a Python package using pip.
-
-    Args:
-        package (str): The name of the package to install.
-    """
-    try:
-        logger.info(f"Installing {package}...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-        logger.info(f"Successfully installed {package}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to install {package}: {e}")
-        sys.exit(1)
-
 def check_and_install_playwright():
     """
     Check if Playwright is installed and install it if it's not present.
+    This function is called only once when the script is first run.
     """
     try:
         import playwright
+        logger.info("Playwright is already installed.")
     except ImportError:
         logger.warning("Playwright not found. Installing...")
-        install_package("playwright")
-        subprocess.run(["playwright", "install"], check=True)
-    else:
-        logger.info("Playwright is already installed.")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
+        subprocess.check_call(["playwright", "install"])
+        logger.info("Playwright installed successfully.")
 
-# Ensure Playwright is installed
+# Run the check and install function
 check_and_install_playwright()
+
+# Now we can safely import from playwright
+from playwright.async_api import async_playwright
 
 def extract_urls(text: str) -> List[str]:
     """
