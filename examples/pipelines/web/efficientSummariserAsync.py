@@ -1,31 +1,3 @@
-"""
-efficientSummariserAsync.py
-
-Efficient Web Summary Pipeline for OpenWebUI and Pipelines
-
-This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
-and generate summaries of web pages using the OpenAI API.
-
-Key features:
-- URL extraction from unstructured text using regex
-- Efficient web scraping using Playwright (Async API)
-- Content filtering to reduce irrelevant data
-- Batched processing of URLs
-- Topic highlighting in summaries
-- Customizable summary length and batch size
-- Model selection from available OpenAI models
-- Integration of summaries back into the original text
-- Dynamic dependency installation
-
-Usage:
-1. Set the OPENAI_API_KEY in the Valves configuration.
-2. Set the TOPICS (comma-separated) in the Valves configuration.
-3. Select the desired model from the dropdown in the Valves configuration.
-4. Optionally adjust MAX_TOKENS and BATCH_SIZE in the Valves configuration.
-5. Input unstructured text containing URLs in the user message.
-6. The pipeline will extract URLs, scrape the web pages, generate summaries, and integrate them back into the text.
-"""
-
 import re
 import sys
 import logging
@@ -34,6 +6,8 @@ import subprocess
 import importlib
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -49,22 +23,6 @@ def check_and_install(package):
     except ImportError:
         logger.info(f"{package} not found, installing...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-def install_system_dependencies():
-    logger.info("Installing system dependencies for Playwright...")
-    try:
-        subprocess.check_call(["apt-get", "update"])
-        subprocess.check_call([
-            "apt-get", "install", "-y",
-            "libglib2.0-0", "libnss3", "libnspr4", "libdbus-1-3", "libatk1.0-0",
-            "libatk-bridge2.0-0", "libcups2", "libdrm2", "libatspi2.0-0",
-            "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1",
-            "libxkbcommon0", "libpango-1.0-0", "libcairo2", "libasound2"
-        ])
-        logger.info("System dependencies installed successfully.")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to install system dependencies: {e}")
-        raise RuntimeError("Failed to install system dependencies. The pipeline may not function correctly.")
 
 def install_dependencies():
     """
@@ -82,6 +40,22 @@ def install_dependencies():
     except Exception as e:
         logger.error(f"Failed to complete playwright installation: {e}")
         raise
+
+def install_system_dependencies():
+    logger.info("Installing system dependencies for Playwright...")
+    try:
+        subprocess.check_call(["apt-get", "update"])
+        subprocess.check_call([
+            "apt-get", "install", "-y",
+            "libglib2.0-0", "libnss3", "libnspr4", "libdbus-1-3", "libatk1.0-0",
+            "libatk-bridge2.0-0", "libcups2", "libdrm2", "libatspi2.0-0",
+            "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1",
+            "libxkbcommon0", "libpango-1.0-0", "libcairo2", "libasound2"
+        ])
+        logger.info("System dependencies installed successfully.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to install system dependencies: {e}")
+        raise RuntimeError("Failed to install system dependencies. The pipeline may not function correctly.")
 
 # Run the installation function
 install_dependencies()
@@ -366,7 +340,7 @@ class Pipeline:
         logger.info(f"Shutting down {self.name}")
         await self.teardown_playwright()
 
-    async def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
+    async def async_pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         """
         Main pipeline function that processes the user input, extracts URLs, and generates summaries.
 
