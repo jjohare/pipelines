@@ -32,32 +32,40 @@ import asyncio
 import subprocess
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
-from bs4 import BeautifulSoup
-from openai import AsyncOpenAI
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def check_and_install_playwright():
+def install_dependencies():
     """
-    Check if Playwright is installed and install it if it's not present.
-    This function is called only once when the script is first run.
+    Check for and install required dependencies.
     """
     try:
         import playwright
-        logger.info("Playwright is already installed.")
+        import requests
+        import bs4
+        import openai
     except ImportError:
-        logger.warning("Playwright not found. Installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright"])
-        subprocess.check_call(["playwright", "install"])
-        logger.info("Playwright installed successfully.")
+        logger.info("Installing required dependencies...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright", "requests", "beautifulsoup4", "openai"])
+        logger.info("Dependencies installed successfully.")
 
-# Run the check and install function
-check_and_install_playwright()
+    # Install Playwright browser
+    try:
+        subprocess.check_call(["playwright", "install", "chromium"])
+        logger.info("Playwright chromium browser installed successfully.")
+    except subprocess.CalledProcessError:
+        logger.error("Failed to install Playwright chromium browser.")
+        raise
 
-# Now we can safely import from playwright
+# Run the installation function
+install_dependencies()
+
+# Now we can safely import the required modules
+from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
+from openai import AsyncOpenAI
 
 def extract_urls(text: str) -> List[str]:
     """
@@ -146,9 +154,9 @@ class Pipeline:
         """
         OPENAI_API_KEY: str = ""  # OpenAI API key
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
-        MAX_TOKENS: int = 2000  # Maximum number of tokens for each summary
-        BATCH_SIZE: int = 10  # Number of URLs to process in each batch
-        MODEL: str = "gpt-3.5-turbo"  # Default model
+        MAX_TOKENS: int = 16000  # Maximum number of tokens for each summary
+        BATCH_SIZE: int = 1  # Number of URLs to process in each batch
+        MODEL: str = "gpt-4o-mini"  # Default model
 
     def __init__(self):
         self.name = "Efficient Web Summary Pipeline"
@@ -165,7 +173,10 @@ class Pipeline:
         try:
             logger.info("Setting up Playwright.")
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch()
+            self.browser = await self.playwright.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
             logger.info("Playwright setup successful.")
         except Exception as e:
             logger.error(f"Playwright setup failed: {e}")
@@ -300,7 +311,7 @@ class Pipeline:
             return available_models
         except Exception as e:
             logger.error(f"Error fetching models: {e}")
-            return ["gpt-3.5-turbo", "gpt-4"]  # Fallback to default models
+            return ["gpt-4o-mini", "gpt-4"]  # Fallback to default models
 
     async def on_startup(self):
         """
