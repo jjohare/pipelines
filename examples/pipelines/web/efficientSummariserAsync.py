@@ -51,9 +51,6 @@ def check_and_install(package):
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 def install_system_dependencies():
-    """
-    Install system dependencies required for Playwright.
-    """
     logger.info("Installing system dependencies for Playwright...")
     try:
         subprocess.check_call(["apt-get", "update"])
