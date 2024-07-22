@@ -6,8 +6,6 @@ import subprocess
 import importlib
 from typing import List, Union, Generator, Iterator
 from pydantic import BaseModel
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,6 +21,22 @@ def check_and_install(package):
     except ImportError:
         logger.info(f"{package} not found, installing...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+def install_system_dependencies():
+    logger.info("Installing system dependencies for Playwright...")
+    try:
+        subprocess.check_call(["apt-get", "update"])
+        subprocess.check_call([
+            "apt-get", "install", "-y",
+            "libglib2.0-0", "libnss3", "libnspr4", "libdbus-1-3", "libatk1.0-0",
+            "libatk-bridge2.0-0", "libcups2", "libdrm2", "libatspi2.0-0",
+            "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1",
+            "libxkbcommon0", "libpango-1.0-0", "libcairo2", "libasound2"
+        ])
+        logger.info("System dependencies installed successfully.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to install system dependencies: {e}")
+        raise RuntimeError("Failed to install system dependencies. The pipeline may not function correctly.")
 
 def install_dependencies():
     """
@@ -40,22 +54,6 @@ def install_dependencies():
     except Exception as e:
         logger.error(f"Failed to complete playwright installation: {e}")
         raise
-
-def install_system_dependencies():
-    logger.info("Installing system dependencies for Playwright...")
-    try:
-        subprocess.check_call(["apt-get", "update"])
-        subprocess.check_call([
-            "apt-get", "install", "-y",
-            "libglib2.0-0", "libnss3", "libnspr4", "libdbus-1-3", "libatk1.0-0",
-            "libatk-bridge2.0-0", "libcups2", "libdrm2", "libatspi2.0-0",
-            "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1",
-            "libxkbcommon0", "libpango-1.0-0", "libcairo2", "libasound2"
-        ])
-        logger.info("System dependencies installed successfully.")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to install system dependencies: {e}")
-        raise RuntimeError("Failed to install system dependencies. The pipeline may not function correctly.")
 
 # Run the installation function
 install_dependencies()
