@@ -338,7 +338,7 @@ class Pipeline:
         logger.info(f"Shutting down {self.name}")
         await self.teardown_playwright()
 
-    async def async_pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
+    async def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         """
         Main pipeline function that processes the user input, extracts URLs, and generates summaries.
 
