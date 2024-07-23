@@ -73,7 +73,7 @@ async def setup_playwright():
 
 def filter_content(html_content):
     """
-    Filter the HTML content to extract relevant text and limit its length.
+    Filter the HTML content to extract relevant text and limit it to the first 2000 words.
     """
     logger.debug("Filtering HTML content")
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -88,18 +88,19 @@ def filter_content(html_content):
         text = soup.get_text(separator=' ', strip=True)
     
     text = re.sub(r'\s+', ' ', text).strip()
-    words = text.split()[:1000]
+    words = text.split()[:2000]  # Limit to first 2000 words
     filtered_text = ' '.join(words)
     logger.debug(f"Filtered content (first 100 chars): {filtered_text[:100]}...")
     return filtered_text
 
+# Update the create_prompt function to reflect the 2000-word limit
 def create_prompt(urls, topics, max_tokens):
     """
     Create a prompt for generating summaries of the specified URLs considering the given topics.
     """
     topics_str = ", ".join(topics)
     prompt = (
-        f"Please create concise summaries of the following web pages, unless they are 404 or similar failures. "
+        f"Please create concise summaries of the following web pages, based on up to the first 2000 words of each page. "
         f"For each summary:\n"
         f"- Start with the URL enclosed in brackets, like this: [URL]\n"
         f"- Follow these guidelines:\n"
@@ -108,7 +109,7 @@ def create_prompt(urls, topics, max_tokens):
         f"  - Check the provided list of topics and include the most relevant ones inline within the summary.\n"
         f"  - Each relevant topic should be marked only once in the summary.\n"
         f"  - Use UK English spelling throughout.\n"
-        f"  - If a web page is inaccessible, mention that instead of providing a summary.\n"
+        f"  - If a web page is inaccessible or empty, mention that instead of providing a summary.\n"
         f"- Keep each summary to approximately {max_tokens} tokens.\n\n"
         f"List of topics to consider: {topics_str}\n\n"
         f"Web pages to summarize:\n" + "\n".join(urls)
@@ -125,10 +126,11 @@ async def scrape_url(url):
         browser = await p.chromium.launch()
         page = await browser.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded")
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)  # 30 seconds timeout
             content = await page.content()
             logger.debug(f"Raw content for {url} (first 100 chars): {content[:100]}...")
             filtered_content = filter_content(content)
+            logger.debug(f"Filtered content word count: {len(filtered_content.split())}")
             return filtered_content
         except Exception as e:
             logger.error(f"Error scraping {url}: {e}")
@@ -136,6 +138,7 @@ async def scrape_url(url):
         finally:
             await browser.close()
 
+# In the summarize_batch function, update the message to reflect the 2000-word limit
 async def summarize_batch(client, urls, topics, max_tokens, model):
     """
     Summarize a batch of URLs using the OpenAI API.
@@ -147,8 +150,8 @@ async def summarize_batch(client, urls, topics, max_tokens, model):
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages."},
         {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web pages and highlight relevant topics as requested."},
-        {"role": "user", "content": "Here are the contents of the web pages:\n\n" + "\n\n".join([f"[{url}]\n{content}" for url, content in zip(urls, scraped_contents) if content])}
+        {"role": "assistant", "content": "I understand. I'll summarize the web pages based on up to the first 2000 words and highlight relevant topics as requested."},
+        {"role": "user", "content": "Here are the contents of the web pages (up to 2000 words each):\n\n" + "\n\n".join([f"[{url}]\n{content}" for url, content in zip(urls, scraped_contents) if content])}
     ]
     
     logger.debug(f"OpenAI API request - Model: {model}, Max tokens: {max_tokens * len(urls)}")
