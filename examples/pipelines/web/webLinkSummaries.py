@@ -66,17 +66,20 @@ def filter_content(html_content: str) -> str:
     logger.debug("Filtering HTML content")
     soup = BeautifulSoup(html_content, 'html.parser')
     
+    # Remove unwanted elements
     for element in soup(['script', 'style', 'nav', 'footer', 'header']):
         element.decompose()
     
+    # Try to find main content, fallback to full body if not found
     main_content = soup.select_one('main, #content, .main-content, article')
     if main_content:
         text = main_content.get_text(separator=' ', strip=True)
     else:
         text = soup.get_text(separator=' ', strip=True)
     
+    # Clean up whitespace and limit to 32000 words
     text = re.sub(r'\s+', ' ', text).strip()
-    words = text.split()[:32000]  # Limit to first 32000 words
+    words = text.split()[:32000]
     filtered_text = ' '.join(words)
     logger.debug(f"Filtered content (first 100 chars): {filtered_text[:100]}...")
     return filtered_text
@@ -190,7 +193,7 @@ def get_available_models(api_key: str) -> List[str]:
     logger.info("Fetching available OpenAI models")
     if not api_key:
         logger.warning("API key is not set. Returning default models.")
-        return ["gpt-4-0125-preview", "gpt-3.5-turbo"]
+        return ["gpt-4o-mini", "gpt-4o"]
     
     client = OpenAI(api_key=api_key)
     try:
@@ -200,7 +203,7 @@ def get_available_models(api_key: str) -> List[str]:
         return available_models
     except Exception as e:
         logger.error(f"Error fetching models: {e}")
-        return ["gpt-4-0125-preview", "gpt-3.5-turbo"]  # Fallback to default models
+        return ["gpt-4o-mini", "gpt-4o"]  # Fallback to default models
 
 class Pipeline:
     class Valves(BaseModel):
@@ -210,10 +213,10 @@ class Pipeline:
         OPENAI_API_KEY: str = ""
         TOPICS: str = ""
         MAX_TOKENS: int = 8000
-        MODEL: str = "gpt-4-0125-preview"
+        MODEL: str = "gpt-4o-mini"
 
     def __init__(self):
-        self.name = "Efficient Web Summary Pipeline"
+        self.name = "Web Summary Pipeline"
         self.valves = self.Valves()
         self.available_models = []
 
@@ -227,7 +230,7 @@ class Pipeline:
             self.available_models = ["gpt-4o-mini", "gpt-4o"]  # Default models
         else:
             self.available_models = get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4-0125-preview"
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
         logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
 
     def on_shutdown(self):
