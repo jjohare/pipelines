@@ -370,101 +370,106 @@ class Pipeline:
         logger.info(f"Starting up {self.name}")
         await self.setup_playwright()
         self.available_models = await self.get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available models else "gpt-4o-mini" logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
-def on_shutdown(self):
-    """
-    Synchronous wrapper for shutdown function.
-    """
-    asyncio.run(self._async_on_shutdown())
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
+        logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
 
-async def _async_on_shutdown(self):
-    """
-    Async function called when the pipeline is shut down.
-    """
-    logger.info(f"Shutting down {self.name}")
-    await self.teardown_playwright()
+    def on_shutdown(self):
+        """
+        Synchronous wrapper for shutdown function.
+        """
+        asyncio.run(self._async_on_shutdown())
 
-def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
-    """
-    Synchronous wrapper for the main pipeline function.
+    async def _async_on_shutdown(self):
+        """
+        Async function called when the pipeline is shut down.
+        """
+        logger.info(f"Shutting down {self.name}")
+        await self.teardown_playwright()
 
-    Args:
-        user_message (str): The user's input message containing unstructured text with URLs.
-        model_id (str): The ID of the model to use (not used in this implementation).
-        messages (List[dict]): Previous messages in the conversation (not used in this implementation).
-        body (dict): Additional request body information (not used in this implementation).
+    def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
+        """
+        Synchronous wrapper for the main pipeline function.
 
-    Returns:
-        str: The original text with integrated summaries for the extracted URLs.
-    """
-    return asyncio.run(self._async_pipe(user_message, model_id, messages, body))
+        Args:
+            user_message (str): The user's input message containing unstructured text with URLs.
+            model_id (str): The ID of the model to use (not used in this implementation).
+            messages (List[dict]): Previous messages in the conversation (not used in this implementation).
+            body (dict): Additional request body information (not used in this implementation).
 
-async def _async_pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
-    """
-    Asynchronous main pipeline function that processes the user input, extracts URLs, and generates summaries.
+        Returns:
+            str: The original text with integrated summaries for the extracted URLs.
+        """
+        return asyncio.run(self._async_pipe(user_message, model_id, messages, body))
 
-    Args:
-        user_message (str): The user's input message containing unstructured text with URLs.
-        model_id (str): The ID of the model to use (not used in this implementation).
-        messages (List[dict]): Previous messages in the conversation (not used in this implementation).
-        body (dict): Additional request body information (not used in this implementation).
+    async def _async_pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
+        """
+        Asynchronous main pipeline function that processes the user input, extracts URLs, and generates summaries.
 
-    Returns:
-        str: The original text with integrated summaries for the extracted URLs.
-    """
-    logger.info(f"Processing input in {self.name}")
-    try:
-        openai_key = self.valves.OPENAI_API_KEY
-        topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
-        max_tokens = self.valves.MAX_TOKENS
-        batch_size = self.valves.BATCH_SIZE
-        model = self.valves.MODEL
-        
-        # Extract URLs from the unstructured text
-        urls = extract_urls(user_message)
-        
-        if not urls:
-            logger.warning("No valid URLs found in the input text.")
-            return "No valid URLs found in the input text."
-        
-        logger.info(f"Found {len(urls)} URLs to process")
-        client = AsyncOpenAI(api_key=openai_key)
-        
-        # Process URLs in batches
-        all_summaries = []
-        
-        for i in range(0, len(urls), batch_size):
-            batch = urls[i:i+batch_size]
-            logger.info(f"Processing batch {i//batch_size + 1} of {len(urls)//batch_size + 1}")
-            batch_summaries = await self.summarize_batch(client, batch, topics, max_tokens, model)
-            all_summaries.append(batch_summaries)
-        
-        combined_summaries = "\n".join(all_summaries)
-        processed_summaries = self.post_process_summaries(combined_summaries, topics)
-        
-        # Integrate summaries back into the original text
-        result = user_message
-        for url in urls:
-            if url in processed_summaries:
-                summary_text = f"\n\n### Web Summary - Auto Generated\n{processed_summaries[url]}\n"
-                result = result.replace(url, f"{url}{summary_text}")
-        
-        logger.info("Processing complete. Returning result.")
-        return result
-    except Exception as e:
-        logger.error(f"Error in pipe function: {e}")
-        return f"An error occurred while processing the request: {str(e)}"
+        Args:
+            user_message (str): The user's input message containing unstructured text with URLs.
+            model_id (str): The ID of the model to use (not used in this implementation).
+            messages (List[dict]): Previous messages in the conversation (not used in this implementation).
+            body (dict): Additional request body information (not used in this implementation).
 
-def get_config(self):
-    """
-    Return the configuration options for the pipeline, including the model dropdown.
-    """
-    logger.info("Retrieving pipeline configuration.")
-    return {
-        "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
-        "TOPICS": {"type": "string", "value": self.valves.TOPICS},
-        "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
-        "BATCH_SIZE": {"type": "number", "value": self.valves.BATCH_SIZE},
-        "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
-    }
+        Returns:
+            str: The original text with integrated summaries for the extracted URLs.
+        """
+        logger.info(f"Processing input in {self.name}")
+        try:
+            openai_key = self.valves.OPENAI_API_KEY
+            topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
+            max_tokens = self.valves.MAX_TOKENS
+            batch_size = self.valves.BATCH_SIZE
+            model = self.valves.MODEL
+            
+            # Extract URLs from the unstructured text
+            urls = extract_urls(user_message)
+            
+            if not urls:
+                logger.warning("No valid URLs found in the input text.")
+                return "No valid URLs found in the input text."
+            
+            logger.info(f"Found {len(urls)} URLs to process")
+            client = AsyncOpenAI(api_key=openai_key)
+            
+            # Process URLs in batches
+            all_summaries = []
+            
+            for i in range(0, len(urls), batch_size):
+                batch = urls[i:i+batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1} of {len(urls)//batch_size + 1}")
+                batch_summaries = await self.summarize_batch(client, batch, topics, max_tokens, model)
+                all_summaries.append(batch_summaries)
+            
+            combined_summaries = "\n".join(all_summaries)
+            processed_summaries = self.post_process_summaries(combined_summaries, topics)
+            
+            # Integrate summaries back into the original text
+            result = user_message
+            for url in urls:
+                if url in processed_summaries:
+                    summary_text = f"\n\n### Web Summary - Auto Generated\n{processed_summaries[url]}\n"
+                    result = result.replace(url, f"{url}{summary_text}")
+            
+            logger.info("Processing complete. Returning result.")
+            return result
+        except Exception as e:
+            logger.error(f"Error in pipe function: {e}")
+            return f"An error occurred while processing the request: {str(e)}"
 
+    def get_config(self):
+        """
+        Return the configuration options for the pipeline, including the model dropdown.
+        """
+        logger.info("Retrieving pipeline configuration.")
+        return {
+            "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
+            "TOPICS": {"type": "string", "value": self.valves.TOPICS},
+            "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
+            "BATCH_SIZE": {"type": "number", "value": self.valves.BATCH_SIZE},
+            "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
+        }
+
+# Expose the Pipeline class
+pipeline = Pipeline()
+logger.info("Pipeline instance created and exposed.")
