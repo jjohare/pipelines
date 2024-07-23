@@ -357,13 +357,7 @@ class Pipeline:
             logger.error(f"Error fetching models: {e}")
             return ["gpt-4o-mini", "gpt-4"]  # Fallback to default models
 
-    def on_startup(self):
-        """
-        Synchronous wrapper for startup function.
-        """
-        asyncio.run(self._async_on_startup())
-
-    async def _async_on_startup(self):
+    async def on_startup(self):
         """
         Async function called when the pipeline is started.
         """
@@ -373,33 +367,13 @@ class Pipeline:
         self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
         logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
 
-    def on_shutdown(self):
-        """
-        Synchronous wrapper for shutdown function.
-        """
-        asyncio.run(self._async_on_shutdown())
-
-    async def _async_on_shutdown(self):
-        """
-        Async function called when the pipeline is shut down.
-        """
-        logger.info(f"Shutting down {self.name}")
-        await self.teardown_playwright()
-
     def pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         """
         Synchronous wrapper for the main pipeline function.
-
-        Args:
-            user_message (str): The user's input message containing unstructured text with URLs.
-            model_id (str): The ID of the model to use (not used in this implementation).
-            messages (List[dict]): Previous messages in the conversation (not used in this implementation).
-            body (dict): Additional request body information (not used in this implementation).
-
-        Returns:
-            str: The original text with integrated summaries for the extracted URLs.
         """
-        return asyncio.run(self._async_pipe(user_message, model_id, messages, body))
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(self._async_pipe(user_message, model_id, messages, body))
+
 
     async def _async_pipe(self, user_message: str, model_id: str = None, messages: List[dict] = None, body: dict = None) -> str:
         """
