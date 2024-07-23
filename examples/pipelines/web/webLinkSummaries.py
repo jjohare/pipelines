@@ -1,41 +1,46 @@
 """
 Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 
-This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text,
-generate summaries of web pages using the OpenAI API, and insert summaries back into the original text.
+This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
+and generate summaries of web pages using the OpenAI API.
 
 Key features:
-- URL extraction from specific Markdown format
-- Linear processing of URLs in document order
-- Web scraping using Playwright
+- URL extraction from unstructured text using regex
+- Efficient web scraping using Playwright
 - Content filtering to reduce irrelevant data
+- Batched processing of URLs
 - Topic highlighting in summaries
-- Customizable summary length
+- Customizable summary length and batch size
 - Model selection from available OpenAI models
-- Extensive logging and debug information
+
+Usage:
+1. Set the OPENAI_API_KEY in the Valves configuration.
+2. Set the TOPICS (comma-separated) in the Valves configuration.
+3. Select the desired model from the dropdown in the Valves configuration.
+4. Optionally adjust MAX_TOKENS and BATCH_SIZE in the Valves configuration.
+5. Input unstructured text containing URLs in the user message.
+6. The pipeline will extract URLs, scrape the web pages, and generate summaries.
 """
 
 import re
-from typing import List, Tuple
+from typing import List, Union, Generator, Iterator, Tuple
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import sys
 import subprocess
+import asyncio
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
-from openai import OpenAI
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from playwright.async_api import async_playwright
+from openai import AsyncOpenAI
 
 def install(package):
     """
     Install the specified package using pip.
     This function is used to install the required dependencies within the pipeline script.
+
+    Args:
+        package (str): The name of the package to install.
     """
-    logger.info(f"Installing package: {package}")
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 # Install the required dependencies
@@ -45,7 +50,6 @@ install("beautifulsoup4")
 install("openai")
 
 # Install Playwright browsers and dependencies
-logger.info("Installing Playwright browsers and dependencies")
 subprocess.run(["playwright", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
 
@@ -53,40 +57,67 @@ def extract_urls(text: str) -> List[Tuple[str, str]]:
     """
     Extract URLs from the specific Markdown format in the text.
     Returns a list of tuples containing (link_text, url).
+
+    Args:
+        text (str): Unstructured text potentially containing URLs.
+
+    Returns:
+        List[Tuple[str, str]]: A list of extracted URLs and their link texts.
     """
     pattern = r'\[(.*?)\]\((.*?)\)(?=\n|\r|\r\n)'
     matches = re.findall(pattern, text)
-    logger.debug(f"Extracted {len(matches)} URLs")
     return matches
+
+async def setup_playwright():
+    """
+    Set up Playwright by installing the required browsers.
+    This function is called during the pipeline startup process.
+    """
+    try:
+        async with async_playwright() as p:
+            await p.chromium.install()
+    except Exception as e:
+        print(f"Error setting up Playwright: {e}")
 
 def filter_content(html_content: str) -> str:
     """
-    Filter the HTML content to extract relevant text and limit it to the first 32000 words.
+    Filter the HTML content to extract relevant text and limit its length.
+
+    Args:
+        html_content (str): The raw HTML content of the web page.
+
+    Returns:
+        str: Filtered and limited text content.
     """
-    logger.debug("Filtering HTML content")
     soup = BeautifulSoup(html_content, 'html.parser')
     
-    # Remove unwanted elements
+    # Remove scripts, styles, and other unnecessary elements
     for element in soup(['script', 'style', 'nav', 'footer', 'header']):
         element.decompose()
     
-    # Try to find main content, fallback to full body if not found
+    # Extract main content (adjust selectors based on common website structures)
     main_content = soup.select_one('main, #content, .main-content, article')
     if main_content:
         text = main_content.get_text(separator=' ', strip=True)
     else:
         text = soup.get_text(separator=' ', strip=True)
     
-    # Clean up whitespace and limit to 32000 words
+    # Remove extra whitespace and limit to first 32000 words
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:32000]
-    filtered_text = ' '.join(words)
-    logger.debug(f"Filtered content (first 100 chars): {filtered_text[:100]}...")
-    return filtered_text
+    return ' '.join(words)
 
 def create_prompt(url: str, topics: List[str], max_tokens: int) -> str:
     """
     Create a prompt for generating a summary of the specified URL considering the given topics.
+
+    Args:
+        url (str): The URL to summarize.
+        topics (List[str]): List of topics to consider in the summaries.
+        max_tokens (int): Maximum number of tokens for the summary.
+
+    Returns:
+        str: The generated prompt for the OpenAI API.
     """
     topics_str = ", ".join(topics)
     prompt = (
@@ -102,36 +133,47 @@ def create_prompt(url: str, topics: List[str], max_tokens: int) -> str:
         f"List of topics to consider: {topics_str}\n\n"
         f"Web page to summarize: {url}"
     )
-    logger.debug(f"Created prompt for URL: {url}")
     return prompt
 
-def scrape_url(url: str) -> str:
+async def scrape_url(url: str) -> str:
     """
     Scrape the content of a given URL using Playwright.
+
+    Args:
+        url (str): The URL to scrape.
+
+    Returns:
+        str or None: The filtered content of the web page, or None if an error occurred.
     """
-    logger.info(f"Scraping URL: {url}")
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)  # 30 seconds timeout
-            content = page.content()
-            logger.debug(f"Raw content for {url} (first 100 chars): {content[:100]}...")
+            await page.goto(url, wait_until="domcontentloaded")
+            content = await page.content()
             filtered_content = filter_content(content)
-            logger.debug(f"Filtered content word count: {len(filtered_content.split())}")
             return filtered_content
         except Exception as e:
-            logger.error(f"Error scraping {url}: {e}")
+            print(f"Error scraping {url}: {e}")
             return None
         finally:
-            browser.close()
+            await browser.close()
 
-def summarize_url(client: OpenAI, url: str, topics: List[str], max_tokens: int, model: str) -> str:
+async def summarize_url(client: AsyncOpenAI, url: str, topics: List[str], max_tokens: int, model: str) -> str:
     """
     Summarize a single URL using the OpenAI API.
+
+    Args:
+        client (AsyncOpenAI): The OpenAI API client.
+        url (str): The URL to summarize.
+        topics (List[str]): List of topics to consider in the summaries.
+        max_tokens (int): Maximum number of tokens for the summary.
+        model (str): The OpenAI model to use for summarization.
+
+    Returns:
+        str: The generated summary.
     """
-    logger.info(f"Summarizing URL: {url}")
-    scraped_content = scrape_url(url)
+    scraped_content = await scrape_url(url)
     if not scraped_content:
         return f"Unable to access or summarize the content at {url}"
 
@@ -144,34 +186,42 @@ def summarize_url(client: OpenAI, url: str, topics: List[str], max_tokens: int, 
         {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
     
-    logger.debug(f"OpenAI API request - Model: {model}, Max tokens: {max_tokens}")
-    response = client.chat.completions.create(
+    response = await client.chat.completions.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens
     )
     
-    summary = response.choices[0].message.content
-    logger.debug(f"Generated summary (first 100 chars): {summary[:100]}...")
-    return summary
+    return response.choices[0].message.content
 
 def post_process_summary(summary: str, topics: List[str]) -> str:
     """
     Post-process the generated summary to ensure proper topic highlighting.
+
+    Args:
+        summary (str): The generated summary.
+        topics (List[str]): List of topics to highlight in the summary.
+
+    Returns:
+        str: The processed summary with proper topic highlighting.
     """
-    logger.info("Post-processing summary")
     for topic in topics:
         if topic.lower() in summary.lower():
             summary = re.sub(r'\b{}\b'.format(re.escape(topic)), r'[[{}]]'.format(topic), summary, count=1, flags=re.IGNORECASE)
     
-    logger.debug(f"Processed summary (first 100 chars): {summary[:100]}...")
     return summary
 
 def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) -> str:
     """
     Insert the generated summaries back into the original text.
+
+    Args:
+        original_text (str): The original text containing URLs.
+        summaries (List[Tuple[str, str, str]]): The summaries to insert, each as a tuple of (link_text, url, summary).
+
+    Returns:
+        str: The text with summaries inserted.
     """
-    logger.info("Inserting summaries into original text")
     lines = original_text.split('\n')
     new_lines = []
     summary_index = 0
@@ -186,103 +236,104 @@ def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) 
 
     return '\n'.join(new_lines)
 
-def get_available_models(api_key: str) -> List[str]:
+async def get_available_models(api_key: str) -> List[str]:
     """
     Fetch the list of available models from OpenAI.
+
+    Args:
+        api_key (str): OpenAI API key.
+
+    Returns:
+        List[str]: List of available model names.
     """
-    logger.info("Fetching available OpenAI models")
-    if not api_key:
-        logger.warning("API key is not set. Returning default models.")
-        return ["gpt-4o-mini", "gpt-4o"]
-    
-    client = OpenAI(api_key=api_key)
+    client = AsyncOpenAI(api_key=api_key)
     try:
-        models = client.models.list()
-        available_models = [model.id for model in models.data if model.id.startswith(("gpt-3.5", "gpt-4"))]
-        logger.debug(f"Available models: {available_models}")
-        return available_models
+        models = await client.models.list()
+        return [model.id for model in models.data if model.id.startswith(("gpt-3.5", "gpt-4"))]
     except Exception as e:
-        logger.error(f"Error fetching models: {e}")
-        return ["gpt-4o-mini", "gpt-4o"]  # Fallback to default models
+        print(f"Error fetching models: {e}")
+        return ["gpt-3.5-turbo", "gpt-4"]  # Fallback to default models
 
 class Pipeline:
     class Valves(BaseModel):
         """
         Configuration options for the pipeline.
+        These options can be set through the OpenWebUI interface.
         """
-        OPENAI_API_KEY: str = ""
-        TOPICS: str = ""
-        MAX_TOKENS: int = 8000
-        MODEL: str = "gpt-4o-mini"
+        OPENAI_API_KEY: str = ""  # OpenAI API key
+        TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
+        MAX_TOKENS: int = 32000  # Maximum number of tokens for each summary
+        BATCH_SIZE: int = 10  # Number of URLs to process in each batch
+        MODEL: str = "gpt-4-turbo"  # Default model
 
     def __init__(self):
-        self.name = "Web Summary Pipeline"
+        self.name = "Efficient Web Summary Pipeline"
         self.valves = self.Valves()
         self.available_models = []
 
-    def on_startup(self):
+    async def on_startup(self):
         """
-        Function called when the pipeline is started.
+        Async function called when the pipeline is started.
         """
-        logger.info(f"Starting up {self.name}")
-        if not self.valves.OPENAI_API_KEY:
-            logger.warning("OpenAI API key is not set. Please set it before using the pipeline.")
-            self.available_models = ["gpt-4o-mini", "gpt-4o"]  # Default models
-        else:
-            self.available_models = get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
-        logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
+        await setup_playwright()  # Set up Playwright in the on_startup method
+        self.available_models = await get_available_models(self.valves.OPENAI_API_KEY)
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4-turbo"
 
-    def on_shutdown(self):
+    async def on_shutdown(self):
         """
-        Function called when the pipeline is shut down.
+        Async function called when the pipeline is shut down.
         """
-        logger.info(f"Shutting down {self.name}")
+        print(f"on_shutdown:{__name__}")
 
-    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> str:
+    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
         """
-        Main pipeline function that processes the user input, extracts URLs, generates summaries,
-        and inserts them back into the original text.
+        Main pipeline function that processes the user input, extracts URLs, and generates summaries.
+
+        Args:
+            user_message (str): The user's input message containing unstructured text with URLs.
+            model_id (str): The ID of the model to use (not used in this implementation).
+            messages (List[dict]): Previous messages in the conversation (not used in this implementation).
+            body (dict): Additional request body information (not used in this implementation).
+
+        Returns:
+            str: The generated summaries for the extracted URLs.
         """
-        logger.info("Processing user message")
         try:
             openai_key = self.valves.OPENAI_API_KEY
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
             max_tokens = self.valves.MAX_TOKENS
+            batch_size = self.valves.BATCH_SIZE
             model = self.valves.MODEL
             
-            logger.debug(f"Pipeline configuration: Topics: {topics}, Max tokens: {max_tokens}, Model: {model}")
+            # Extract URLs from the unstructured text
+            urls = extract_urls(user_message)
             
-            url_matches = extract_urls(user_message)
+            if not urls:
+                return "No valid URLs found in the input text."
             
-            if not url_matches:
-                logger.warning("No valid URLs found in the input text")
-                return user_message
-
-            client = OpenAI(api_key=openai_key)
+            client = AsyncOpenAI(api_key=openai_key)
             
+            # Process URLs in batches
             summaries = []
-            for link_text, url in url_matches:
-                summary = summarize_url(client, url, topics, max_tokens, model)
+            for link_text, url in urls:
+                summary = asyncio.run(summarize_url(client, url, topics, max_tokens, model))
                 processed_summary = post_process_summary(summary, topics)
                 summaries.append((link_text, url, processed_summary))
             
             result = insert_summaries(user_message, summaries)
-            
-            logger.info("Pipeline processing complete")
             return result
         except Exception as e:
-            logger.error(f"Error in pipe function: {e}")
+            print(f"Error in pipe function: {e}")
             return f"An error occurred while processing the request: {str(e)}"
 
     def get_config(self):
         """
         Return the configuration options for the pipeline, including the model dropdown.
         """
-        logger.debug("Returning pipeline configuration")
         return {
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
             "TOPICS": {"type": "string", "value": self.valves.TOPICS},
             "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
+            "BATCH_SIZE": {"type": "number", "value": self.valves.BATCH_SIZE},
             "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
         }
