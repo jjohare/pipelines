@@ -1,30 +1,29 @@
 """
 Efficient Web Summary Pipeline for OpenWebUI and Pipelines
 
-This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text
-and generate summaries of web pages using the OpenAI API.
+This pipeline script integrates with OpenWebUI and Pipelines to extract URLs from unstructured text,
+generate summaries of web pages using the OpenAI API, and insert summaries back into the original text.
 
 Key features:
-- URL extraction from unstructured text using regex
-- Efficient web scraping using Playwright
+- URL extraction from specific Markdown format
+- Linear processing of URLs in document order
+- Web scraping using Playwright
 - Content filtering to reduce irrelevant data
-- Batched processing of URLs
 - Topic highlighting in summaries
-- Customizable summary length and batch size
+- Customizable summary length
 - Model selection from available OpenAI models
 - Extensive logging and debug information
 """
 
 import re
-from typing import List, Union, Generator, Iterator
+from typing import List, Tuple
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
 import sys
 import subprocess
-import asyncio
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
-from openai import AsyncOpenAI
+from playwright.sync_api import sync_playwright
+from openai import OpenAI
 import logging
 
 # Set up logging
@@ -50,28 +49,17 @@ logger.info("Installing Playwright browsers and dependencies")
 subprocess.run(["playwright", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
 
-def extract_urls(text):
+def extract_urls(text: str) -> List[Tuple[str, str]]:
     """
-    Extract URLs from unstructured text using regex.
+    Extract URLs from the specific Markdown format in the text.
+    Returns a list of tuples containing (link_text, url).
     """
-    url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
-    urls = list(set(re.findall(url_pattern, text)))
-    logger.debug(f"Extracted URLs: {urls}")
-    return urls
+    pattern = r'\[(.*?)\]\((.*?)\)(?=\n|\r|\r\n)'
+    matches = re.findall(pattern, text)
+    logger.debug(f"Extracted {len(matches)} URLs")
+    return matches
 
-async def setup_playwright():
-    """
-    Set up Playwright by installing the required browsers.
-    """
-    try:
-        logger.info("Setting up Playwright")
-        async with async_playwright() as p:
-            await p.chromium.install()
-        logger.info("Playwright setup completed successfully")
-    except Exception as e:
-        logger.error(f"Error setting up Playwright: {e}")
-
-def filter_content(html_content):
+def filter_content(html_content: str) -> str:
     """
     Filter the HTML content to extract relevant text and limit it to the first 2000 words.
     """
@@ -93,41 +81,38 @@ def filter_content(html_content):
     logger.debug(f"Filtered content (first 100 chars): {filtered_text[:100]}...")
     return filtered_text
 
-# Update the create_prompt function to reflect the 2000-word limit
-def create_prompt(urls, topics, max_tokens):
+def create_prompt(url: str, topics: List[str], max_tokens: int) -> str:
     """
-    Create a prompt for generating summaries of the specified URLs considering the given topics.
+    Create a prompt for generating a summary of the specified URL considering the given topics.
     """
     topics_str = ", ".join(topics)
     prompt = (
-        f"Please create concise summaries of the following web pages, based on up to the first 2000 words of each page. "
-        f"For each summary:\n"
-        f"- Start with the URL enclosed in brackets, like this: [URL]\n"
-        f"- Follow these guidelines:\n"
-        f"  - Start each summary with a hyphen followed by a space ('- ').\n"
-        f"  - If bullet points are appropriate, use a tab followed by a hyphen and a space ('\\t- ') for each point.\n"
-        f"  - Check the provided list of topics and include the most relevant ones inline within the summary.\n"
-        f"  - Each relevant topic should be marked only once in the summary.\n"
-        f"  - Use UK English spelling throughout.\n"
-        f"  - If a web page is inaccessible or empty, mention that instead of providing a summary.\n"
-        f"- Keep each summary to approximately {max_tokens} tokens.\n\n"
+        f"Please create a concise summary of the following web page, based on up to the first 2000 words of the page. "
+        f"Follow these guidelines:\n"
+        f"- Start the summary with a hyphen followed by a space ('- ').\n"
+        f"- If bullet points are appropriate, use a tab followed by a hyphen and a space ('\\t- ') for each point.\n"
+        f"- Check the provided list of topics and include the most relevant ones inline within the summary.\n"
+        f"- Each relevant topic should be marked only once in the summary.\n"
+        f"- Use UK English spelling throughout.\n"
+        f"- If the web page is inaccessible or empty, mention that instead of providing a summary.\n"
+        f"- Keep the summary to approximately {max_tokens} tokens.\n\n"
         f"List of topics to consider: {topics_str}\n\n"
-        f"Web pages to summarize:\n" + "\n".join(urls)
+        f"Web page to summarize: {url}"
     )
-    logger.debug(f"Created prompt: {prompt}")
+    logger.debug(f"Created prompt for URL: {url}")
     return prompt
 
-async def scrape_url(url):
+def scrape_url(url: str) -> str:
     """
     Scrape the content of a given URL using Playwright.
     """
     logger.info(f"Scraping URL: {url}")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)  # 30 seconds timeout
-            content = await page.content()
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)  # 30 seconds timeout
+            content = page.content()
             logger.debug(f"Raw content for {url} (first 100 chars): {content[:100]}...")
             filtered_content = filter_content(content)
             logger.debug(f"Filtered content word count: {len(filtered_content.split())}")
@@ -136,77 +121,82 @@ async def scrape_url(url):
             logger.error(f"Error scraping {url}: {e}")
             return None
         finally:
-            await browser.close()
+            browser.close()
 
-# In the summarize_batch function, update the message to reflect the 2000-word limit
-async def summarize_batch(client, urls, topics, max_tokens, model):
+def summarize_url(client: OpenAI, url: str, topics: List[str], max_tokens: int, model: str) -> str:
     """
-    Summarize a batch of URLs using the OpenAI API.
+    Summarize a single URL using the OpenAI API.
     """
-    logger.info(f"Summarizing batch of {len(urls)} URLs")
-    scraped_contents = await asyncio.gather(*[scrape_url(url) for url in urls])
-    prompt = create_prompt(urls, topics, max_tokens)
+    logger.info(f"Summarizing URL: {url}")
+    scraped_content = scrape_url(url)
+    if not scraped_content:
+        return f"Unable to access or summarize the content at {url}"
+
+    prompt = create_prompt(url, topics, max_tokens)
     
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages."},
         {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web pages based on up to the first 2000 words and highlight relevant topics as requested."},
-        {"role": "user", "content": "Here are the contents of the web pages (up to 2000 words each):\n\n" + "\n\n".join([f"[{url}]\n{content}" for url, content in zip(urls, scraped_contents) if content])}
+        {"role": "assistant", "content": "I understand. I'll summarize the web page based on up to the first 2000 words and highlight relevant topics as requested."},
+        {"role": "user", "content": f"Here is the content of the web page (up to 2000 words):\n\n{scraped_content}"}
     ]
     
-    logger.debug(f"OpenAI API request - Model: {model}, Max tokens: {max_tokens * len(urls)}")
-    response = await client.chat.completions.create(
+    logger.debug(f"OpenAI API request - Model: {model}, Max tokens: {max_tokens}")
+    response = client.chat.completions.create(
         model=model,
         messages=messages,
-        max_tokens=max_tokens * len(urls)
+        max_tokens=max_tokens
     )
     
     summary = response.choices[0].message.content
     logger.debug(f"Generated summary (first 100 chars): {summary[:100]}...")
     return summary
 
-def post_process_summaries(summaries, topics):
+def post_process_summary(summary: str, topics: List[str]) -> str:
     """
-    Post-process the generated summaries to ensure proper topic highlighting.
+    Post-process the generated summary to ensure proper topic highlighting.
     """
-    logger.info("Post-processing summaries")
-    processed_summaries = []
-    for summary in summaries.split("[http"):
-        if not summary.strip():
-            continue
-        summary = "[http" + summary
-        parts = summary.split("]", 1)
-        if len(parts) < 2:
-            url = "Unknown URL"
-            content = summary.strip()
-        else:
-            url = parts[0][1:]
-            content = parts[1].strip()
-        
-        for topic in topics:
-            if topic.lower() in content.lower():
-                content = re.sub(r'\b{}\b'.format(re.escape(topic)), r'[[{}]]'.format(topic), content, count=1, flags=re.IGNORECASE)
-        
-        processed_summaries.append(f"{url}\n{content}")
+    logger.info("Post-processing summary")
+    for topic in topics:
+        if topic.lower() in summary.lower():
+            summary = re.sub(r'\b{}\b'.format(re.escape(topic)), r'[[{}]]'.format(topic), summary, count=1, flags=re.IGNORECASE)
     
-    result = "\n\n".join(processed_summaries)
-    logger.debug(f"Processed summaries (first 100 chars): {result[:100]}...")
-    return result
+    logger.debug(f"Processed summary (first 100 chars): {summary[:100]}...")
+    return summary
 
-async def get_available_models(api_key):
+def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) -> str:
+    """
+    Insert the generated summaries back into the original text.
+    """
+    logger.info("Inserting summaries into original text")
+    lines = original_text.split('\n')
+    new_lines = []
+    summary_index = 0
+
+    for line in lines:
+        new_lines.append(line)
+        if summary_index < len(summaries):
+            link_text, url, summary = summaries[summary_index]
+            if f"[{link_text}]({url})" in line:
+                new_lines.append(f"\t\t- {summary}")
+                summary_index += 1
+
+    return '\n'.join(new_lines)
+
+def get_available_models(api_key: str) -> List[str]:
     """
     Fetch the list of available models from OpenAI.
     """
     logger.info("Fetching available OpenAI models")
-    client = AsyncOpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key)
     try:
-        models = await client.models.list()
+        models = client.models.list()
         available_models = [model.id for model in models.data if model.id.startswith(("gpt-3.5", "gpt-4"))]
         logger.debug(f"Available models: {available_models}")
         return available_models
     except Exception as e:
         logger.error(f"Error fetching models: {e}")
-        return ["gpt-3.5-turbo", "gpt-4"]  # Fallback to default models
+        return ["gpt-4o-mini", "gpt-4"]  # Fallback to default models
 
 class Pipeline:
     class Valves(BaseModel):
@@ -215,66 +205,61 @@ class Pipeline:
         """
         OPENAI_API_KEY: str = ""
         TOPICS: str = ""
-        MAX_TOKENS: int = 2000
-        BATCH_SIZE: int = 10
-        MODEL: str = "gpt-3.5-turbo"
+        MAX_TOKENS: int = 300
+        MODEL: str = "gpt-4o-mini"
 
     def __init__(self):
-        self.name = "Efficient Web Summary Pipeline"
+        self.name = "Web Summary Pipeline"
         self.valves = self.Valves()
         self.available_models = []
 
-    async def on_startup(self):
+    def on_startup(self):
         """
-        Async function called when the pipeline is started.
+        Function called when the pipeline is started.
         """
         logger.info(f"Starting up {self.name}")
-        await setup_playwright()
-        self.available_models = await get_available_models(self.valves.OPENAI_API_KEY)
+        self.available_models = get_available_models(self.valves.OPENAI_API_KEY)
         self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-3.5-turbo"
         logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
 
-    async def on_shutdown(self):
+    def on_shutdown(self):
         """
-        Async function called when the pipeline is shut down.
+        Function called when the pipeline is shut down.
         """
         logger.info(f"Shutting down {self.name}")
 
-    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> Union[str, Generator, Iterator]:
+    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> str:
         """
-        Main pipeline function that processes the user input, extracts URLs, and generates summaries.
+        Main pipeline function that processes the user input, extracts URLs, generates summaries,
+        and inserts them back into the original text.
         """
         logger.info("Processing user message")
         try:
             openai_key = self.valves.OPENAI_API_KEY
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
             max_tokens = self.valves.MAX_TOKENS
-            batch_size = self.valves.BATCH_SIZE
             model = self.valves.MODEL
             
-            logger.debug(f"Pipeline configuration: Topics: {topics}, Max tokens: {max_tokens}, Batch size: {batch_size}, Model: {model}")
+            logger.debug(f"Pipeline configuration: Topics: {topics}, Max tokens: {max_tokens}, Model: {model}")
             
-            urls = extract_urls(user_message)
+            url_matches = extract_urls(user_message)
             
-            if not urls:
+            if not url_matches:
                 logger.warning("No valid URLs found in the input text")
-                return "No valid URLs found in the input text."
+                return user_message
+
+            client = OpenAI(api_key=openai_key)
             
-            client = AsyncOpenAI(api_key=openai_key)
+            summaries = []
+            for link_text, url in url_matches:
+                summary = summarize_url(client, url, topics, max_tokens, model)
+                processed_summary = post_process_summary(summary, topics)
+                summaries.append((link_text, url, processed_summary))
             
-            all_summaries = []
-            
-            for i in range(0, len(urls), batch_size):
-                batch = urls[i:i+batch_size]
-                logger.info(f"Processing batch {i//batch_size + 1} of {(len(urls) - 1)//batch_size + 1}")
-                batch_summaries = asyncio.run(summarize_batch(client, batch, topics, max_tokens, model))
-                all_summaries.append(batch_summaries)
-            
-            combined_summaries = "\n".join(all_summaries)
-            processed_summaries = post_process_summaries(combined_summaries, topics)
+            result = insert_summaries(user_message, summaries)
             
             logger.info("Pipeline processing complete")
-            return processed_summaries
+            return result
         except Exception as e:
             logger.error(f"Error in pipe function: {e}")
             return f"An error occurred while processing the request: {str(e)}"
@@ -288,6 +273,5 @@ class Pipeline:
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
             "TOPICS": {"type": "string", "value": self.valves.TOPICS},
             "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
-            "BATCH_SIZE": {"type": "number", "value": self.valves.BATCH_SIZE},
             "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
         }
