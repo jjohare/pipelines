@@ -61,7 +61,7 @@ def extract_urls(text: str) -> List[Tuple[str, str]]:
 
 def filter_content(html_content: str) -> str:
     """
-    Filter the HTML content to extract relevant text and limit it to the first 2000 words.
+    Filter the HTML content to extract relevant text and limit it to the first 32000 words.
     """
     logger.debug("Filtering HTML content")
     soup = BeautifulSoup(html_content, 'html.parser')
@@ -76,7 +76,7 @@ def filter_content(html_content: str) -> str:
         text = soup.get_text(separator=' ', strip=True)
     
     text = re.sub(r'\s+', ' ', text).strip()
-    words = text.split()[:2000]  # Limit to first 2000 words
+    words = text.split()[:32000]  # Limit to first 32000 words
     filtered_text = ' '.join(words)
     logger.debug(f"Filtered content (first 100 chars): {filtered_text[:100]}...")
     return filtered_text
@@ -87,7 +87,7 @@ def create_prompt(url: str, topics: List[str], max_tokens: int) -> str:
     """
     topics_str = ", ".join(topics)
     prompt = (
-        f"Please create a concise summary of the following web page, based on up to the first 2000 words of the page. "
+        f"Please create a concise summary of the following web page, based on up to the first 32000 words of the page. "
         f"Follow these guidelines:\n"
         f"- Start the summary with a hyphen followed by a space ('- ').\n"
         f"- If bullet points are appropriate, use a tab followed by a hyphen and a space ('\\t- ') for each point.\n"
@@ -137,8 +137,8 @@ def summarize_url(client: OpenAI, url: str, topics: List[str], max_tokens: int, 
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages."},
         {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web page based on up to the first 2000 words and highlight relevant topics as requested."},
-        {"role": "user", "content": f"Here is the content of the web page (up to 2000 words):\n\n{scraped_content}"}
+        {"role": "assistant", "content": "I understand. I'll summarize the web page based on up to the first 32000 words and highlight relevant topics as requested."},
+        {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
     
     logger.debug(f"OpenAI API request - Model: {model}, Max tokens: {max_tokens}")
@@ -188,6 +188,10 @@ def get_available_models(api_key: str) -> List[str]:
     Fetch the list of available models from OpenAI.
     """
     logger.info("Fetching available OpenAI models")
+    if not api_key:
+        logger.warning("API key is not set. Returning default models.")
+        return ["gpt-4-0125-preview", "gpt-3.5-turbo"]
+    
     client = OpenAI(api_key=api_key)
     try:
         models = client.models.list()
@@ -196,7 +200,7 @@ def get_available_models(api_key: str) -> List[str]:
         return available_models
     except Exception as e:
         logger.error(f"Error fetching models: {e}")
-        return ["gpt-4o-mini", "gpt-4"]  # Fallback to default models
+        return ["gpt-4-0125-preview", "gpt-3.5-turbo"]  # Fallback to default models
 
 class Pipeline:
     class Valves(BaseModel):
@@ -205,11 +209,11 @@ class Pipeline:
         """
         OPENAI_API_KEY: str = ""
         TOPICS: str = ""
-        MAX_TOKENS: int = 300
-        MODEL: str = "gpt-4o-mini"
+        MAX_TOKENS: int = 8000
+        MODEL: str = "gpt-4-0125-preview"
 
     def __init__(self):
-        self.name = "Web Summary Pipeline"
+        self.name = "Efficient Web Summary Pipeline"
         self.valves = self.Valves()
         self.available_models = []
 
@@ -218,8 +222,12 @@ class Pipeline:
         Function called when the pipeline is started.
         """
         logger.info(f"Starting up {self.name}")
-        self.available_models = get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-3.5-turbo"
+        if not self.valves.OPENAI_API_KEY:
+            logger.warning("OpenAI API key is not set. Please set it before using the pipeline.")
+            self.available_models = ["gpt-4o-mini", "gpt-4o"]  # Default models
+        else:
+            self.available_models = get_available_models(self.valves.OPENAI_API_KEY)
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4-0125-preview"
         logger.info(f"Startup complete. Using model: {self.valves.MODEL}")
 
     def on_shutdown(self):
