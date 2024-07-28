@@ -127,9 +127,11 @@ def create_prompt(url: str, topics: List[str], max_tokens: int) -> str:
     topics_str = ", ".join(topics)
     prompt = (
         f"Please create a concise summary of the following web page, based on up to the first 32000 words of the page. "
+        f"Context of the link: '{context}'\n"
+        f"Link text: '{link_text}'\n"
         f"Follow these guidelines:\n"
         f"- Start the summary with a hyphen followed by a space ('- ').\n"
-        f"- If bullet points are appropriate, use a tab followed by a hyphen and a space ('\\t- ') for each point.\n"
+        f"- If bullet points are appropriate, use a tab followed by a hyphen and a space for each point.\n"
         f"- Check the provided list of topics and include the most relevant ones inline within the summary.\n"
         f"- Each relevant topic should be marked only once in the summary.\n"
         f"- Use UK English spelling throughout.\n"
@@ -227,15 +229,15 @@ def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) 
     Returns:
         str: The text with summaries inserted.
     """
-    lines = original_text.split('\n')
+     lines = original_text.split('\n')
     new_lines = []
     summary_index = 0
 
     for line in lines:
         new_lines.append(line)
         if summary_index < len(summaries):
-            _, url, summary = summaries[summary_index]
-            if url in line:
+            context, link_text, url, summary = summaries[summary_index]
+            if context in line and url in line:
                 new_lines.append(f"\n{summary}\n")
                 summary_index += 1
 
