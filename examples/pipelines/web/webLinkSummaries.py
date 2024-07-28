@@ -55,18 +55,23 @@ subprocess.run(["playwright", "install-deps"], check=True)
 
 def extract_urls(text: str) -> List[Tuple[str, str]]:
     """
-    Extract URLs from the specific Markdown format in the text.
-    Returns a list of tuples containing (link_text, url).
+    Extract all URLs from the text.
+    Returns a list of tuples containing (url, url).
 
     Args:
         text (str): Unstructured text potentially containing URLs.
 
     Returns:
-        List[Tuple[str, str]]: A list of extracted URLs and their link texts.
+        List[Tuple[str, str]]: A list of extracted URLs.
     """
-    pattern = r'\[(.*?)\]\((.*?)\)(?=\n|\r|\r\n)'
-    matches = re.findall(pattern, text)
-    return matches
+    # Pattern for URLs
+    url_pattern = r'(https?://\S+)'
+    
+    # Extract all URLs
+    urls = re.findall(url_pattern, text)
+    
+    # Return list of tuples (url, url)
+    return [(url, url) for url in urls]
 
 async def setup_playwright():
     """
@@ -217,7 +222,7 @@ def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) 
 
     Args:
         original_text (str): The original text containing URLs.
-        summaries (List[Tuple[str, str, str]]): The summaries to insert, each as a tuple of (link_text, url, summary).
+        summaries (List[Tuple[str, str, str]]): The summaries to insert, each as a tuple of (url, url, summary).
 
     Returns:
         str: The text with summaries inserted.
@@ -229,9 +234,9 @@ def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) 
     for line in lines:
         new_lines.append(line)
         if summary_index < len(summaries):
-            link_text, url, summary = summaries[summary_index]
-            if f"[{link_text}]({url})" in line:
-                new_lines.append(f"\t\t- {summary}")
+            _, url, summary = summaries[summary_index]
+            if url in line:
+                new_lines.append(f"\n{summary}\n")
                 summary_index += 1
 
     return '\n'.join(new_lines)
@@ -315,10 +320,10 @@ class Pipeline:
             
             # Process URLs in batches
             summaries = []
-            for link_text, url in urls:
+            for url, _ in urls:
                 summary = asyncio.run(summarize_url(client, url, topics, max_tokens, model))
                 processed_summary = post_process_summary(summary, topics)
-                summaries.append((link_text, url, processed_summary))
+                summaries.append((url, url, processed_summary))
             
             result = insert_summaries(user_message, summaries)
             return result
