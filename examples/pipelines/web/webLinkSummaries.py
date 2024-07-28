@@ -53,25 +53,40 @@ install("openai")
 subprocess.run(["playwright", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
 
-def extract_urls(text: str) -> List[Tuple[str, str]]:
+def extract_urls(text: str) -> List[Tuple[str, str, str]]:
     """
-    Extract all URLs from the text.
-    Returns a list of tuples containing (url, url).
+    Extract URLs from the text, including both Markdown-style links and regular URLs.
+    Returns a list of tuples containing (context, link_text, url).
 
     Args:
         text (str): Unstructured text potentially containing URLs.
 
     Returns:
-        List[Tuple[str, str]]: A list of extracted URLs.
+        List[Tuple[str, str, str]]: A list of extracted URLs with context and link text.
     """
-    # Pattern for URLs
+    # Pattern for Markdown-style links
+    markdown_pattern = r'\[([^\]]+)\]\((https?://\S+)\)'
+    
+    # Pattern for regular URLs
     url_pattern = r'(https?://\S+)'
     
-    # Extract all URLs
-    urls = re.findall(url_pattern, text)
+    urls = []
+    lines = text.split('\n')
     
-    # Return list of tuples (url, url)
-    return [(url, url) for url in urls]
+    for line in lines:
+        # Extract Markdown-style links
+        markdown_matches = re.findall(markdown_pattern, line)
+        for link_text, url in markdown_matches:
+            urls.append((line.strip(), link_text, url))
+        
+        # Extract regular URLs
+        url_matches = re.findall(url_pattern, line)
+        for url in url_matches:
+            # Check if this URL is not already part of a Markdown-style link
+            if not any(url == md_url for _, md_url in markdown_matches):
+                urls.append((line.strip(), url, url))  # Use the URL itself as the link text
+    
+    return urls
 
 async def setup_playwright():
     """
@@ -112,11 +127,13 @@ def filter_content(html_content: str) -> str:
     words = text.split()[:32000]
     return ' '.join(words)
 
-def create_prompt(url: str, topics: List[str], max_tokens: int) -> str:
+def create_prompt(context: str, link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
     Create a prompt for generating a summary of the specified URL considering the given topics.
 
     Args:
+        context (str): The context in which the URL appears.
+        link_text (str): The text of the link, if available.
         url (str): The URL to summarize.
         topics (List[str]): List of topics to consider in the summaries.
         max_tokens (int): Maximum number of tokens for the summary.
@@ -166,12 +183,14 @@ async def scrape_url(url: str) -> str:
         finally:
             await browser.close()
 
-async def summarize_url(client: AsyncOpenAI, url: str, topics: List[str], max_tokens: int, model: str) -> str:
+async def summarize_url(client: AsyncOpenAI, context: str, link_text: str, url: str, topics: List[str], max_tokens: int, model: str) -> str:
     """
     Summarize a single URL using the OpenAI API.
 
     Args:
         client (AsyncOpenAI): The OpenAI API client.
+        context (str): The context in which the URL appears.
+        link_text (str): The text of the link, if available.
         url (str): The URL to summarize.
         topics (List[str]): List of topics to consider in the summaries.
         max_tokens (int): Maximum number of tokens for the summary.
@@ -184,7 +203,7 @@ async def summarize_url(client: AsyncOpenAI, url: str, topics: List[str], max_to
     if not scraped_content:
         return f"Unable to access or summarize the content at {url}"
 
-    prompt = create_prompt(url, topics, max_tokens)
+    prompt = create_prompt(context, link_text, url, topics, max_tokens)
     
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages."},
@@ -218,18 +237,18 @@ def post_process_summary(summary: str, topics: List[str]) -> str:
     
     return summary
 
-def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str]]) -> str:
+def insert_summaries(original_text: str, summaries: List[Tuple[str, str, str, str]]) -> str:
     """
     Insert the generated summaries back into the original text.
 
     Args:
         original_text (str): The original text containing URLs.
-        summaries (List[Tuple[str, str, str]]): The summaries to insert, each as a tuple of (url, url, summary).
+        summaries (List[Tuple[str, str, str, str]]): The summaries to insert, each as a tuple of (context, link_text, url, summary).
 
     Returns:
         str: The text with summaries inserted.
     """
-     lines = original_text.split('\n')
+    lines = original_text.split('\n')
     new_lines = []
     summary_index = 0
 
@@ -322,10 +341,10 @@ class Pipeline:
             
             # Process URLs in batches
             summaries = []
-            for url, _ in urls:
-                summary = asyncio.run(summarize_url(client, url, topics, max_tokens, model))
+            for context, link_text, url in urls:
+                summary = asyncio.run(summarize_url(client, context, link_text, url, topics, max_tokens, model))
                 processed_summary = post_process_summary(summary, topics)
-                summaries.append((url, url, processed_summary))
+                summaries.append((context, link_text, url, processed_summary))
             
             result = insert_summaries(user_message, summaries)
             return result
