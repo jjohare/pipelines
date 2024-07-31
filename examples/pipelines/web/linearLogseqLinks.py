@@ -291,9 +291,13 @@ try:
     result["status"] = "success"
     debug_log(f"Successfully summarized {url}")
     return result
-except (json.JSONDecodeError, Exception) as e:
-    # If JSON parsing fails or any other exception occurs, return a failure status
-    logger.error(f"Error in summarize_url for {url}: {e}")
+except json.JSONDecodeError as json_err:
+    logger.error(f"JSON decoding error in summarize_url for {url}: {json_err}")
+    return {
+        "status": "failure",
+    }
+except Exception as general_err:
+    logger.error(f"General error in summarize_url for {url}: {general_err}")
     return {
         "status": "failure",
     }
