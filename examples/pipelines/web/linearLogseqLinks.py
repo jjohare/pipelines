@@ -268,26 +268,36 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
         {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
+
     
-    try:
-        debug_log(f"Sending request to OpenAI API for {url}")
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens
-        )
-        
-        # Attempt to parse the JSON response
-        result = json.loads(response.choices[0].message.content)
-        result["status"] = "success"
-        debug_log(f"Successfully summarized {url}")
-        return result
-    except (json.JSONDecodeError, Exception) as e:
-        # If JSON parsing fails or any other exception occurs, return a failure status
-        logger.error(f"Error in summarize_url for {url}: {e}")
+try:
+    debug_log(f"Sending request to OpenAI API for {url}")
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens
+    )
+    
+    # Check if the response contains choices and is not empty
+    if not response or not response.choices or not response.choices[0].message.content:
+        debug_log(f"Empty or invalid response from OpenAI API for {url}")
         return {
             "status": "failure",
         }
+    
+    # Attempt to parse the JSON response
+    debug_log(f"Response from OpenAI: {response.choices[0].message.content}")
+    result = json.loads(response.choices[0].message.content)
+    result["status"] = "success"
+    debug_log(f"Successfully summarized {url}")
+    return result
+except (json.JSONDecodeError, Exception) as e:
+    # If JSON parsing fails or any other exception occurs, return a failure status
+    logger.error(f"Error in summarize_url for {url}: {e}")
+    return {
+        "status": "failure",
+    }
+
 
 async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str) -> str:
     """
