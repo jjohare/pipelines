@@ -11,19 +11,21 @@ Key features:
 - Content filtering to reduce irrelevant data
 - Skipping of blocks with embedded links and lots of text
 - Topic highlighting in summaries
-- Customizable summary length and model selection
+- Customizable summary length
 - Incorporation of original links in summaries
+- JSON-structured responses for better parsing
+- Logseq-compatible output format
 
 Usage:
 1. Set the OPENAI_API_KEY in the Valves configuration.
 2. Set the TOPICS (comma-separated) in the Valves configuration.
-3. Select the desired model from the dropdown in the Valves configuration.
-4. Optionally adjust MAX_TOKENS in the Valves configuration.
-5. Input markdown-style text with blocks starting with "- " in the user message.
-6. The pipeline will process eligible blocks, generate summaries, and return the modified text.
+3. Optionally adjust MAX_TOKENS in the Valves configuration.
+4. Input markdown-style text with blocks starting with "- " in the user message.
+5. The pipeline will process eligible blocks, generate summaries, and return the modified text.
 """
 
 import re
+import json
 from typing import List, Union, Tuple
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
@@ -33,7 +35,6 @@ import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
-
 
 def install(package):
     """
@@ -146,7 +147,6 @@ def filter_content(html_content: str) -> str:
     words = text.split()[:32000]
     return ' '.join(words)
 
-
 async def scrape_url(url: str) -> str:
     """
     Scrape the content of a given URL using Playwright.
@@ -171,7 +171,6 @@ async def scrape_url(url: str) -> str:
         finally:
             await browser.close()
 
-
 def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
     Create a prompt for generating a summary of the specified URL considering the given topics.
@@ -187,23 +186,25 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
     """
     topics_str = ", ".join(topics)
     prompt = (
-        f"Please create a concise summary of the following web page, based on up to the first 32000 words of the page. "
+        f"Summarize the following web page and return the result in JSON format. "
         f"Follow these guidelines:\n"
-        f"- Start the summary with the original link in markdown format: [<link_text>](<url>).\n"
-        f"- Continue the summary immediately after the link.\n"
-        f"- If bullet points are appropriate, use a tab followed by a hyphen and a space for each point.\n"
-        f"- Check the provided list of topics and include the most relevant ones inline within the summary.\n"
-        f"- Each relevant topic should be marked only once in the summary using double square brackets, e.g., [[topic]].\n"
-        f"- Use UK English spelling throughout.\n"
-        f"- If the web page is inaccessible or empty, mention that instead of providing a summary.\n"
-        f"- Keep the summary to approximately {max_tokens} tokens.\n\n"
-        f"List of topics to consider: {topics_str}\n\n"
+        f"1. If the page is accessible and contains content:\n"
+        f"   a. Create a brief descriptive heading (max 50 characters).\n"
+        f"   b. Summarize the content in approximately {max_tokens} tokens.\n"
+        f"   c. Explicitly incorporate at least 3 relevant topics from this list: {topics_str}.\n"
+        f"   d. Format the summary using Logseq-style indentation (tab, dash, space).\n"
+        f"2. If the page is inaccessible or empty, return the original link without commentary.\n"
+        f"3. Return the result in this JSON format:\n"
+        f"   {{\"status\": \"success\" or \"failure\",\n"
+        f"    \"heading\": \"Brief descriptive heading\",\n"
+        f"    \"summary\": \"Formatted summary\",\n"
+        f"    \"used_topics\": [\"topic1\", \"topic2\", \"topic3\"]}}\n\n"
         f"Link text: '{link_text}'\n"
         f"Web page to summarize: {url}"
     )
     return prompt
 
-async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str) -> str:
+async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str) -> dict:
     """
     Summarize a single URL using the OpenAI API.
 
@@ -216,18 +217,21 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         model (str): The OpenAI model to use for summarization.
 
     Returns:
-        str: The generated summary.
+        dict: A dictionary containing the summarization result or failure information.
     """
     scraped_content = await scrape_url(url)
     if not scraped_content:
-        return f"[{link_text}]({url}) - Unable to access or summarize the content at this URL."
+        return {
+            "status": "failure",
+            "original_text": f"- [{link_text}]({url})"
+        }
 
     prompt = create_prompt(link_text, url, topics, max_tokens)
     
     messages = [
-        {"role": "system", "content": "You are a helpful assistant that summarizes web pages."},
+        {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
         {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web page based on up to the first 32000 words, include the original link, and highlight relevant topics as requested."},
+        {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
         {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
     
@@ -237,29 +241,16 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         max_tokens=max_tokens
     )
     
-    return response.choices[0].message.content
-
-def post_process_summary(summary: str, topics: List[str]) -> str:
-    """
-    Post-process the generated summary to ensure proper formatting and topic highlighting.
-
-    Args:
-        summary (str): The generated summary.
-        topics (List[str]): List of topics to highlight in the summary.
-
-    Returns:
-        str: The processed summary with proper formatting and topic highlighting.
-    """
-    # Ensure the summary starts with a markdown link
-    if not summary.startswith("["):
-        summary = re.sub(r'^(https?://\S+)', r'[\1](\1)', summary)
-    
-    # Highlight topics
-    for topic in topics:
-        if topic.lower() in summary.lower():
-            summary = re.sub(r'\b{}\b'.format(re.escape(topic)), r'[[{}]]'.format(topic), summary, count=1, flags=re.IGNORECASE)
-    
-    return summary
+    try:
+        # Attempt to parse the JSON response
+        result = json.loads(response.choices[0].message.content)
+        return result
+    except json.JSONDecodeError:
+        # If JSON parsing fails, return a failure status with the original link
+        return {
+            "status": "failure",
+            "original_text": f"- [{link_text}]({url})"
+        }
 
 async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str) -> str:
     """
@@ -278,10 +269,21 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
     link_text, url, remaining_text = extract_url_from_block(block)
     
     if url:
-        summary = await summarize_url(client, link_text, url, topics, max_tokens, model)
-        processed_summary = post_process_summary(summary, topics)
-        return f"- {processed_summary}"
+        result = await summarize_url(client, link_text, url, topics, max_tokens, model)
+        if result["status"] == "success":
+            # Format the successful summary in Logseq-compatible format
+            formatted_summary = (
+                f"- ### {result['heading']}\n"
+                f"\t[This web link has been automatically summarised]({url})\n"
+                f"{result['summary']}\n"
+                f"\tTopics: {', '.join(result['used_topics'])}"
+            )
+            return formatted_summary
+        else:
+            # Return the original text if summarization failed
+            return result["original_text"]
     else:
+        # Return the original block if no URL was found
         return block
 
 class Pipeline:
@@ -293,7 +295,7 @@ class Pipeline:
         OPENAI_API_KEY: str = ""  # OpenAI API key
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
         MAX_TOKENS: int = 300  # Maximum number of tokens for each summary
-        MODEL: str = "gpt-4o-mini"  # Default model
+        MODEL: str = "gpt-4o-mini"  # Default model (hardcoded)
 
     def __init__(self):
         self.name = "Linear Web Summary Pipeline"
@@ -367,11 +369,11 @@ class Pipeline:
             return result
         except Exception as e:
             print(f"Error in pipe function: {e}")
-            return f"An error occurred while processing the request: {str(e)}"
+            return user_message  # Return the original message if an error occurs
 
     def get_config(self):
         """
-        Return the configuration options for the pipeline, including the model dropdown.
+        Return the configuration options for the pipeline.
         """
         return {
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
