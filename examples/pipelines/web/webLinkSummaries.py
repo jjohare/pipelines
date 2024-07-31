@@ -275,10 +275,10 @@ async def get_available_models(api_key: str) -> List[str]:
     client = AsyncOpenAI(api_key=api_key)
     try:
         models = await client.models.list()
-        return [model.id for model in models.data if model.id.startswith(("gpt-3.5", "gpt-4"))]
+        return [model.id for model in models.data if model.id.startswith(("gpt-4o-mini", "gpt-4"))]
     except Exception as e:
         print(f"Error fetching models: {e}")
-        return ["gpt-3.5-turbo", "gpt-4"]  # Fallback to default models
+        return ["gpt-4o-mini", "gpt-4"]  # Fallback to default models
 
 class Pipeline:
     class Valves(BaseModel):
@@ -290,7 +290,7 @@ class Pipeline:
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
         MAX_TOKENS: int = 32000  # Maximum number of tokens for each summary
         BATCH_SIZE: int = 10  # Number of URLs to process in each batch
-        MODEL: str = "gpt-4-turbo"  # Default model
+        MODEL: str = "gpt-4o-mini"  # Default model
 
     def __init__(self):
         self.name = "Efficient Web Summary Pipeline"
@@ -303,7 +303,7 @@ class Pipeline:
         """
         await setup_playwright()  # Set up Playwright in the on_startup method
         self.available_models = await get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4-turbo"
+        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
 
     async def on_shutdown(self):
         """
