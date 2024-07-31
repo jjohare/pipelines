@@ -34,7 +34,26 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
-# (Keep the existing installation and setup code)
+
+def install(package):
+    """
+    Install the specified package using pip.
+    This function is used to install the required dependencies within the pipeline script.
+
+    Args:
+        package (str): The name of the package to install.
+    """
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+# Install the required dependencies
+install("requests")
+install("playwright")
+install("beautifulsoup4")
+install("openai")
+
+# Install Playwright browsers and dependencies
+subprocess.run(["playwright", "install"], check=True)
+subprocess.run(["playwright", "install-deps"], check=True)
 
 def extract_blocks(text: str) -> List[str]:
     """
@@ -88,7 +107,70 @@ def should_process_block(block: str) -> bool:
         return False
     return True
 
-# (Keep the existing setup_playwright, filter_content, and scrape_url functions)
+async def setup_playwright():
+    """
+    Set up Playwright by installing the required browsers.
+    This function is called during the pipeline startup process.
+    """
+    try:
+        async with async_playwright() as p:
+            await p.chromium.install()
+    except Exception as e:
+        print(f"Error setting up Playwright: {e}")
+
+def filter_content(html_content: str) -> str:
+    """
+    Filter the HTML content to extract relevant text and limit its length.
+
+    Args:
+        html_content (str): The raw HTML content of the web page.
+
+    Returns:
+        str: Filtered and limited text content.
+    """
+    soup = BeautifulSoup(html_content, 'html.parser')
+    
+    # Remove scripts, styles, and other unnecessary elements
+    for element in soup(['script', 'style', 'nav', 'footer', 'header']):
+        element.decompose()
+    
+    # Extract main content (adjust selectors based on common website structures)
+    main_content = soup.select_one('main, #content, .main-content, article')
+    if main_content:
+        text = main_content.get_text(separator=' ', strip=True)
+    else:
+        text = soup.get_text(separator=' ', strip=True)
+    
+    # Remove extra whitespace and limit to first 32000 words
+    text = re.sub(r'\s+', ' ', text).strip()
+    words = text.split()[:32000]
+    return ' '.join(words)
+
+
+async def scrape_url(url: str) -> str:
+    """
+    Scrape the content of a given URL using Playwright.
+
+    Args:
+        url (str): The URL to scrape.
+
+    Returns:
+        str or None: The filtered content of the web page, or None if an error occurred.
+    """
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
+        try:
+            await page.goto(url, wait_until="domcontentloaded")
+            content = await page.content()
+            filtered_content = filter_content(content)
+            return filtered_content
+        except Exception as e:
+            print(f"Error scraping {url}: {e}")
+            return None
+        finally:
+            await browser.close()
+
 
 def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
@@ -216,15 +298,12 @@ class Pipeline:
     def __init__(self):
         self.name = "Linear Web Summary Pipeline"
         self.valves = self.Valves()
-        self.available_models = []
 
     async def on_startup(self):
         """
         Async function called when the pipeline is started.
         """
         await setup_playwright()
-        self.available_models = await get_available_models(self.valves.OPENAI_API_KEY)
-        self.valves.MODEL = self.available_models[0] if self.available_models else "gpt-4o-mini"
 
     async def on_shutdown(self):
         """
@@ -298,5 +377,5 @@ class Pipeline:
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
             "TOPICS": {"type": "string", "value": self.valves.TOPICS},
             "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
-            "MODEL": {"type": "select", "value": self.valves.MODEL, "options": self.available_models}
+            "MODEL": {"type": "string", "value": self.valves.MODEL}
         }
