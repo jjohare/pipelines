@@ -16,6 +16,7 @@ Key features:
 - JSON-structured responses for better parsing
 - Logseq-compatible output format
 - Debug logging with easy enable/disable option
+- Improved error handling and retry mechanism
 
 Usage:
 1. Set the OPENAI_API_KEY in the Valves configuration.
@@ -37,6 +38,7 @@ import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Debug logging configuration
 DEBUG_MODE = True  # Set to False to disable debug logging
@@ -68,6 +70,7 @@ install("requests")
 install("playwright")
 install("beautifulsoup4")
 install("openai")
+install("tenacity")
 
 # Install Playwright browsers and dependencies
 debug_log("Installing Playwright browsers and dependencies")
@@ -188,20 +191,24 @@ async def scrape_url(url: str) -> str:
         str or None: The filtered content of the web page, or None if an error occurred.
     """
     debug_log(f"Scraping URL: {url}")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
-        try:
-            await page.goto(url, wait_until="domcontentloaded")
-            content = await page.content()
-            filtered_content = filter_content(content)
-            debug_log(f"Successfully scraped and filtered content from {url}")
-            return filtered_content
-        except Exception as e:
-            logger.error(f"Error scraping {url}: {e}")
-            return None
-        finally:
-            await browser.close()
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            page = await browser.new_page()
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)  # Increase timeout to 30 seconds
+                content = await page.content()
+                filtered_content = filter_content(content)
+                debug_log(f"Successfully scraped and filtered content from {url}")
+                return filtered_content
+            except Exception as e:
+                logger.error(f"Error scraping {url}: {e}")
+                return None
+            finally:
+                await browser.close()
+    except Exception as e:
+        logger.error(f"Unexpected error while setting up Playwright for {url}: {e}")
+        return None
 
 def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
@@ -237,6 +244,14 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
     debug_log(f"Created prompt for URL: {url}")
     return prompt
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+async def api_call_with_retry(client, model, messages, max_tokens):
+    return await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens
+    )
+
 async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str) -> dict:
     """
     Summarize a single URL using the OpenAI API.
@@ -252,41 +267,44 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
     Returns:
         dict: A dictionary containing the summarization result or failure information.
     """
-    debug_log(f"Attempting to summarize URL: {url}")
-    scraped_content = await scrape_url(url)
-    if not scraped_content:
-        debug_log(f"Failed to scrape content from {url}")
-        return {
-            "status": "failure",
-        }
-
-    prompt = create_prompt(link_text, url, topics, max_tokens)
-    
-    messages = [
-        {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
-        {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
-    ]
-    
     try:
+        debug_log(f"Attempting to summarize URL: {url}")
+        scraped_content = await scrape_url(url)
+        if not scraped_content:
+            debug_log(f"Failed to scrape content from {url}")
+            return {
+                "status": "failure",
+                "error": "Failed to scrape content"
+            }
+
+        prompt = create_prompt(link_text, url, topics, max_tokens)
+        
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
+            {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
+        ]
+        
         debug_log(f"Sending request to OpenAI API for {url}")
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens
-        )
+        response = await api_call_with_retry(client, model, messages, max_tokens)
         
         # Attempt to parse the JSON response
         result = json.loads(response.choices[0].message.content)
         result["status"] = "success"
         debug_log(f"Successfully summarized {url}")
         return result
-    except (json.JSONDecodeError, Exception) as e:
-        # If JSON parsing fails or any other exception occurs, return a failure status
-        logger.error(f"Error in summarize_url for {url}: {e}")
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing error in summarize_url for {url}: {e}")
         return {
             "status": "failure",
+            "error": "Failed to parse JSON response"
+        }
+    except Exception as e:
+        logger.error(f"Unexpected error in summarize_url for {url}: {e}")
+        return {
+            "status": "failure",
+            "error": str(e)
         }
 
 async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str) -> str:
@@ -309,7 +327,6 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
     if url:
         result = await summarize_url(client, link_text, url, topics, max_tokens, model)
         if result.get("status") == "success":
-            # Format the successful summary in Logseq-compatible format
             formatted_summary = (
                 f"- ### {result.get('heading', 'Summary')}\n"
                 f"\t[This web link has been automatically summarised]({url})\n"
@@ -319,8 +336,9 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
             debug_log(f"Successfully summarized URL: {url}")
             return formatted_summary
         else:
-            debug_log(f"Failed to summarize URL: {url}. Returning original block.")
-            return block
+            error_message = result.get("error", "Unknown error occurred")
+            debug_log(f"Failed to summarize URL: {url}. Error: {error_message}")
+            return f"- [{link_text}]({url})\n\t*Error: {error_message}*"
     else:
         debug_log("No URL found in block. Returning original block.")
         return block
@@ -381,7 +399,7 @@ class Pipeline:
         debug_log(f"Completed processing {len(processed_blocks)} blocks")
         return processed_blocks
 
-    def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> str:
+    async def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> str:
         """
         Main pipeline function that processes the user input, extracts blocks, and generates summaries.
 
@@ -394,6 +412,7 @@ class Pipeline:
         Returns:
             str: The processed text with summaries for eligible blocks.
         """
+        client = None
         try:
             debug_log("Starting pipe function")
             openai_key = self.valves.OPENAI_API_KEY
@@ -410,7 +429,7 @@ class Pipeline:
             
             # Process blocks
             debug_log("Processing blocks")
-            processed_blocks = asyncio.run(self.process_blocks(blocks, client, topics, max_tokens, model))
+            processed_blocks = await self.process_blocks(blocks, client, topics, max_tokens, model)
             
             # Combine processed blocks into final output
             result = "\n".join(processed_blocks)
@@ -421,6 +440,9 @@ class Pipeline:
             logger.error(f"Error in pipe function: {e}")
             debug_log(f"Returning original user message due to error")
             return user_message  # Return the original message if an error occurs
+        finally:
+            if client:
+                await client.close()
 
     def get_config(self):
         """
