@@ -15,7 +15,6 @@ Key features:
 - Incorporation of original links in summaries
 - JSON-structured responses for better parsing
 - Logseq-compatible output format
-- Debug logging with easy enable/disable option
 
 Usage:
 1. Set the OPENAI_API_KEY in the Valves configuration.
@@ -27,7 +26,6 @@ Usage:
 
 import re
 import json
-import logging
 from typing import List, Union, Tuple
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
@@ -38,20 +36,6 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from openai import AsyncOpenAI
 
-# Debug logging configuration
-DEBUG_MODE = True  # Set to False to disable debug logging
-
-if DEBUG_MODE:
-    logging.basicConfig(level=logging.DEBUG)
-    logger = logging.getLogger(__name__)
-else:
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
-
-def debug_log(message):
-    if DEBUG_MODE:
-        logger.debug(message)
-
 def install(package):
     """
     Install the specified package using pip.
@@ -60,7 +44,6 @@ def install(package):
     Args:
         package (str): The name of the package to install.
     """
-    debug_log(f"Installing package: {package}")
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 # Install the required dependencies
@@ -70,7 +53,6 @@ install("beautifulsoup4")
 install("openai")
 
 # Install Playwright browsers and dependencies
-debug_log("Installing Playwright browsers and dependencies")
 subprocess.run(["playwright", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
 
@@ -84,9 +66,7 @@ def extract_blocks(text: str) -> List[str]:
     Returns:
         List[str]: List of extracted text blocks.
     """
-    blocks = re.split(r'\n(?=- )', text)
-    debug_log(f"Extracted {len(blocks)} blocks from input text")
-    return blocks
+    return re.split(r'\n(?=- )', text)
 
 def extract_url_from_block(block: str) -> Tuple[str, str, str]:
     """
@@ -104,18 +84,13 @@ def extract_url_from_block(block: str) -> Tuple[str, str, str]:
     # Check for Markdown-style link
     markdown_match = re.match(r'\[([^\]]+)\]\((https?://\S+)\)(.*)', content)
     if markdown_match:
-        link_text, url, remaining = markdown_match.groups()
-        debug_log(f"Extracted Markdown-style link: {link_text} - {url}")
-        return link_text, url, remaining
+        return markdown_match.group(1), markdown_match.group(2), markdown_match.group(3)
     
     # Check for regular URL
     url_match = re.match(r'(https?://\S+)(.*)', content)
     if url_match:
-        url, remaining = url_match.groups()
-        debug_log(f"Extracted regular URL: {url}")
-        return url, url, remaining
+        return url_match.group(1), url_match.group(1), url_match.group(2)
     
-    debug_log("No URL found in block")
     return "", "", content
 
 def should_process_block(block: str) -> bool:
@@ -128,8 +103,8 @@ def should_process_block(block: str) -> bool:
     Returns:
         bool: True if the block should be processed, False otherwise.
     """
+    # Skip blocks with embedded links and lots of text
     if len(block.split()) > 50 and len(re.findall(r'(https?://\S+)', block)) > 1:
-        debug_log("Skipping block due to length and multiple URLs")
         return False
     return True
 
@@ -139,12 +114,10 @@ async def setup_playwright():
     This function is called during the pipeline startup process.
     """
     try:
-        debug_log("Setting up Playwright")
         async with async_playwright() as p:
             await p.chromium.install()
-        debug_log("Playwright setup completed successfully")
     except Exception as e:
-        logger.error(f"Error setting up Playwright: {e}")
+        print(f"Error setting up Playwright: {e}")
 
 def filter_content(html_content: str) -> str:
     """
@@ -156,7 +129,6 @@ def filter_content(html_content: str) -> str:
     Returns:
         str: Filtered and limited text content.
     """
-    debug_log("Filtering HTML content")
     soup = BeautifulSoup(html_content, 'html.parser')
     
     # Remove scripts, styles, and other unnecessary elements
@@ -173,9 +145,7 @@ def filter_content(html_content: str) -> str:
     # Remove extra whitespace and limit to first 32000 words
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:32000]
-    filtered_text = ' '.join(words)
-    debug_log(f"Filtered content length: {len(filtered_text)} characters")
-    return filtered_text
+    return ' '.join(words)
 
 async def scrape_url(url: str) -> str:
     """
@@ -187,7 +157,6 @@ async def scrape_url(url: str) -> str:
     Returns:
         str or None: The filtered content of the web page, or None if an error occurred.
     """
-    debug_log(f"Scraping URL: {url}")
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
@@ -195,10 +164,9 @@ async def scrape_url(url: str) -> str:
             await page.goto(url, wait_until="domcontentloaded")
             content = await page.content()
             filtered_content = filter_content(content)
-            debug_log(f"Successfully scraped and filtered content from {url}")
             return filtered_content
         except Exception as e:
-            logger.error(f"Error scraping {url}: {e}")
+            print(f"Error scraping {url}: {e}")
             return None
         finally:
             await browser.close()
@@ -234,7 +202,6 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
         f"Link text: '{link_text}'\n"
         f"Web page to summarize: {url}"
     )
-    debug_log(f"Created prompt for URL: {url}")
     return prompt
 
 async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str) -> dict:
@@ -252,12 +219,11 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
     Returns:
         dict: A dictionary containing the summarization result or failure information.
     """
-    debug_log(f"Attempting to summarize URL: {url}")
     scraped_content = await scrape_url(url)
     if not scraped_content:
-        debug_log(f"Failed to scrape content from {url}")
         return {
             "status": "failure",
+            "original_text": f"- [{link_text}]({url})"
         }
 
     prompt = create_prompt(link_text, url, topics, max_tokens)
@@ -269,24 +235,21 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
     
+    response = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens
+    )
+    
     try:
-        debug_log(f"Sending request to OpenAI API for {url}")
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=max_tokens
-        )
-        
         # Attempt to parse the JSON response
         result = json.loads(response.choices[0].message.content)
-        result["status"] = "success"
-        debug_log(f"Successfully summarized {url}")
         return result
-    except (json.JSONDecodeError, Exception) as e:
-        # If JSON parsing fails or any other exception occurs, return a failure status
-        logger.error(f"Error in summarize_url for {url}: {e}")
+    except json.JSONDecodeError:
+        # If JSON parsing fails, return a failure status with the original link
         return {
             "status": "failure",
+            "original_text": f"- [{link_text}]({url})"
         }
 
 async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str) -> str:
@@ -303,26 +266,24 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
     Returns:
         str: The processed block, either summarized or original.
     """
-    debug_log(f"Processing block: {block[:50]}...")
     link_text, url, remaining_text = extract_url_from_block(block)
     
     if url:
         result = await summarize_url(client, link_text, url, topics, max_tokens, model)
-        if result.get("status") == "success":
+        if result["status"] == "success":
             # Format the successful summary in Logseq-compatible format
             formatted_summary = (
-                f"- ### {result.get('heading', 'Summary')}\n"
+                f"- ### {result['heading']}\n"
                 f"\t[This web link has been automatically summarised]({url})\n"
-                f"{result.get('summary', 'No summary available.')}\n"
-                f"\tTopics: {', '.join(result.get('used_topics', []))}"
+                f"{result['summary']}\n"
+                f"\tTopics: {', '.join(result['used_topics'])}"
             )
-            debug_log(f"Successfully summarized URL: {url}")
             return formatted_summary
         else:
-            debug_log(f"Failed to summarize URL: {url}. Returning original block.")
-            return block
+            # Return the original text if summarization failed
+            return result["original_text"]
     else:
-        debug_log("No URL found in block. Returning original block.")
+        # Return the original block if no URL was found
         return block
 
 class Pipeline:
@@ -339,21 +300,18 @@ class Pipeline:
     def __init__(self):
         self.name = "Linear Web Summary Pipeline"
         self.valves = self.Valves()
-        debug_log("Pipeline initialized")
 
     async def on_startup(self):
         """
         Async function called when the pipeline is started.
         """
-        debug_log("Pipeline startup initiated")
         await setup_playwright()
-        debug_log("Pipeline startup completed")
 
     async def on_shutdown(self):
         """
         Async function called when the pipeline is shut down.
         """
-        debug_log(f"Pipeline shutdown: {__name__}")
+        print(f"on_shutdown:{__name__}")
 
     async def process_blocks(self, blocks: List[str], client: AsyncOpenAI, topics: List[str], max_tokens: int, model: str) -> List[str]:
         """
@@ -369,16 +327,13 @@ class Pipeline:
         Returns:
             List[str]: List of processed blocks.
         """
-        debug_log(f"Processing {len(blocks)} blocks")
         processed_blocks = []
         for block in blocks:
             if should_process_block(block):
                 processed_block = await process_block(client, block, topics, max_tokens, model)
             else:
-                debug_log("Skipping block processing")
                 processed_block = block  # Skip processing, keep original
             processed_blocks.append(processed_block)
-        debug_log(f"Completed processing {len(processed_blocks)} blocks")
         return processed_blocks
 
     def pipe(self, user_message: str, model_id: str, messages: List[dict], body: dict) -> str:
@@ -395,13 +350,10 @@ class Pipeline:
             str: The processed text with summaries for eligible blocks.
         """
         try:
-            debug_log("Starting pipe function")
             openai_key = self.valves.OPENAI_API_KEY
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
             max_tokens = self.valves.MAX_TOKENS
             model = self.valves.MODEL
-            
-            debug_log(f"Using model: {model}, max_tokens: {max_tokens}, topics: {topics}")
             
             client = AsyncOpenAI(api_key=openai_key)
             
@@ -409,24 +361,20 @@ class Pipeline:
             blocks = extract_blocks(user_message)
             
             # Process blocks
-            debug_log("Processing blocks")
             processed_blocks = asyncio.run(self.process_blocks(blocks, client, topics, max_tokens, model))
             
             # Combine processed blocks into final output
             result = "\n".join(processed_blocks)
             
-            debug_log("Pipe function completed successfully")
             return result
         except Exception as e:
-            logger.error(f"Error in pipe function: {e}")
-            debug_log(f"Returning original user message due to error")
+            print(f"Error in pipe function: {e}")
             return user_message  # Return the original message if an error occurs
 
     def get_config(self):
         """
         Return the configuration options for the pipeline.
         """
-        debug_log("Retrieving pipeline configuration")
         return {
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
             "TOPICS": {"type": "string", "value": self.valves.TOPICS},
