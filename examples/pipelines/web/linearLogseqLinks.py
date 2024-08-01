@@ -2,12 +2,14 @@
 Enhanced Web Summary Pipeline for OpenWebUI and Pipelines
 
 This pipeline script integrates with OpenWebUI and Pipelines to process markdown-style text blocks,
-extract URLs, and generate summaries of web pages using the OpenAI API.
+extract URLs, and generate summaries of web pages using the OpenAI API. It now includes Reddit API
+integration and improved web scraping capabilities.
 
 Key features:
 - Processing of text blocks starting with "- "
 - URL extraction from the beginning of text blocks
-- Efficient web scraping using Playwright
+- Efficient web scraping using Playwright with stealth mode
+- Reddit API integration for Reddit URLs
 - Content filtering to reduce irrelevant data
 - Skipping of blocks with embedded links and lots of text
 - Topic highlighting in summaries
@@ -15,17 +17,21 @@ Key features:
 - Incorporation of original links in summaries
 - JSON-structured responses for better parsing
 - Logseq-compatible output format
+- Random user agent selection for web scraping
 
 Usage:
 1. Set the OPENAI_API_KEY in the Valves configuration.
 2. Set the TOPICS (comma-separated) in the Valves configuration.
 3. Optionally adjust MAX_TOKENS in the Valves configuration.
-4. Input markdown-style text with blocks starting with "- " in the user message.
-5. The pipeline will process eligible blocks, generate summaries, and return the modified text.
+4. Set Reddit API credentials if needed.
+5. Input markdown-style text with blocks starting with "- " in the user message.
+6. The pipeline will process eligible blocks, generate summaries, and return the modified text.
 """
 
 import re
 import json
+import random
+import requests
 from typing import List, Union, Tuple
 from schemas import OpenAIChatMessage
 from pydantic import BaseModel
@@ -34,6 +40,7 @@ import subprocess
 import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 from openai import AsyncOpenAI
 
 def install(package):
@@ -51,6 +58,7 @@ install("requests")
 install("playwright")
 install("beautifulsoup4")
 install("openai")
+install("playwright-stealth")
 
 # Install Playwright browsers and dependencies
 subprocess.run(["playwright", "install"], check=True)
@@ -147,19 +155,35 @@ def filter_content(html_content: str) -> str:
     words = text.split()[:32000]
     return ' '.join(words)
 
-async def scrape_url(url: str) -> str:
+async def scrape_url(url: str, random_user_agent: bool) -> str:
     """
-    Scrape the content of a given URL using Playwright.
+    Scrape the content of a given URL using Playwright with stealth mode.
 
     Args:
         url (str): The URL to scrape.
+        random_user_agent (bool): Whether to use a random user agent.
 
     Returns:
         str or None: The filtered content of the web page, or None if an error occurred.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
+        context = await browser.new_context()
+        
+        # Apply stealth settings
+        await stealth_async(context)
+
+        if random_user_agent:
+            user_agents = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.3 Safari/605.1.15",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59"
+            ]
+            await context.set_extra_http_headers({"User-Agent": random.choice(user_agents)})
+
+        page = await context.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded")
             content = await page.content()
@@ -204,7 +228,7 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
     )
     return prompt
 
-async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str) -> dict:
+async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> dict:
     """
     Summarize a single URL using the OpenAI API.
 
@@ -215,11 +239,12 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         topics (List[str]): List of topics to consider in the summaries.
         max_tokens (int): Maximum number of tokens for the summary.
         model (str): The OpenAI model to use for summarization.
+        random_user_agent (bool): Whether to use a random user agent for scraping.
 
     Returns:
         dict: A dictionary containing the summarization result or failure information.
     """
-    scraped_content = await scrape_url(url)
+    scraped_content = await scrape_url(url, random_user_agent)
     if not scraped_content:
         return {
             "status": "failure",
@@ -252,7 +277,7 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
             "original_text": f"- [{link_text}]({url})"
         }
 
-async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str) -> str:
+async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool, reddit_client: 'RedditClient') -> str:
     """
     Process a single block, generating a summary if it contains a URL at the beginning.
 
@@ -262,6 +287,8 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
         topics (List[str]): List of topics to consider in the summaries.
         max_tokens (int): Maximum number of tokens for the summary.
         model (str): The OpenAI model to use for summarization.
+        random_user_agent (bool): Whether to use a random user agent for scraping.
+        reddit_client (RedditClient): The Reddit API client.
 
     Returns:
         str: The processed block, either summarized or original.
@@ -269,7 +296,11 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
     link_text, url, remaining_text = extract_url_from_block(block)
     
     if url:
-        result = await summarize_url(client, link_text, url, topics, max_tokens, model)
+        if reddit_client.is_reddit_url(url):
+            result = reddit_client.get_reddit_content(url)
+        else:
+            result = await summarize_url(client, link_text, url, topics, max_tokens, model, random_user_agent)
+        
         if result["status"] == "success":
             # Format the successful summary in Logseq-compatible format
             formatted_summary = (
@@ -286,6 +317,57 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
         # Return the original block if no URL was found
         return block
 
+class RedditClient:
+    def __init__(self, client_id, client_secret, user_agent, username, password):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.user_agent = user_agent
+        self.username = username
+        self.password = password
+        self.token = None
+
+    def get_reddit_token(self):
+        auth = requests.auth.HTTPBasicAuth(self.client_id, self.client_secret)
+        data = {
+            'grant_type': 'password',
+            'username': self.username,
+            'password': self.password
+        }
+        headers = {'User-Agent': self.user_agent}
+        res = requests.post('https://www.reddit.com/api/v1/access_token', auth=auth, data=data, headers=headers)
+        self.token = res.json()['access_token']
+
+    def is_reddit_url(self, url: str) -> bool:
+        reddit_pattern = r'^https?://(?:www\.)?reddit\.com/r/[^/]+/comments/'
+        return bool(re.match(reddit_pattern, url))
+
+    def get_reddit_content(self, url: str) -> dict:
+        if not self.token:
+            self.get_reddit_token()
+
+        headers = {"Authorization": f"bearer {self.token}", "User-Agent": self.user_agent}
+        
+        # Extract the Reddit post ID from the URL
+        post_id = url.split('/')[-3]
+        
+        # Fetch the post data
+        response = requests.get(f"https://oauth.reddit.com/api/info?id=t3_{post_id}", headers=headers)
+        post_data = response.json()['data']['children'][0]['data']
+        
+        # Construct a summary of the post
+        summary = f"Title: {post_data['title']}\n"
+        summary += f"Author: u/{post_data['author']}\n"
+        summary += f"Score: {post_data['score']}\n"
+        summary += f"Number of comments: {post_data['num_comments']}\n\n"
+        summary += f"Content:\n{post_data['selftext']}"
+        
+        return {
+            "status": "success",
+            "heading": f"Reddit: {post_data['title'][:50]}",
+            "summary": summary,
+            "used_topics": ["Reddit", "Social Media", "User-generated Content"]
+        }
+
 class Pipeline:
     class Valves(BaseModel):
         """
@@ -296,16 +378,30 @@ class Pipeline:
         TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
         MAX_TOKENS: int = 300  # Maximum number of tokens for each summary
         MODEL: str = "gpt-4o-mini"  # Default model (hardcoded)
+        RANDOM_USER_AGENT: bool = True  # Whether to use random user agents for web scraping
+        REDDIT_CLIENT_ID: str = "rTvRmnRVbkTu_PSrjn_sMg"
+        REDDIT_SECRET: str = "IRtDXbZSEHHG-iciLlhEU4BzDxBLYA"
+        REDDIT_USER_AGENT: str = "openwebui reddit lookup for logseq"
+        REDDIT_USERNAME: str = ""
+        REDDIT_PASSWORD: str = ""
 
     def __init__(self):
-        self.name = "Linear Web Summary Pipeline"
+        self.name = "Enhanced Linear Web Summary Pipeline"
         self.valves = self.Valves()
+        self.reddit_client = None
 
     async def on_startup(self):
         """
         Async function called when the pipeline is started.
         """
         await setup_playwright()
+        self.reddit_client = RedditClient(
+            self.valves.REDDIT_CLIENT_ID,
+            self.valves.REDDIT_SECRET,
+            self.valves.REDDIT_USER_AGENT,
+            self.valves.REDDIT_USERNAME,
+            self.valves.REDDIT_PASSWORD
+        )
 
     async def on_shutdown(self):
         """
@@ -313,7 +409,7 @@ class Pipeline:
         """
         print(f"on_shutdown:{__name__}")
 
-    async def process_blocks(self, blocks: List[str], client: AsyncOpenAI, topics: List[str], max_tokens: int, model: str) -> List[str]:
+    async def process_blocks(self, blocks: List[str], client: AsyncOpenAI, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> List[str]:
         """
         Process all blocks, either summarizing or skipping them based on content.
 
@@ -323,6 +419,7 @@ class Pipeline:
             topics (List[str]): List of topics to consider in the summaries.
             max_tokens (int): Maximum number of tokens for each summary.
             model (str): The OpenAI model to use for summarization.
+            random_user_agent (bool): Whether to use random user agents for web scraping.
 
         Returns:
             List[str]: List of processed blocks.
@@ -330,7 +427,7 @@ class Pipeline:
         processed_blocks = []
         for block in blocks:
             if should_process_block(block):
-                processed_block = await process_block(client, block, topics, max_tokens, model)
+                processed_block = await process_block(client, block, topics, max_tokens, model, random_user_agent, self.reddit_client)
             else:
                 processed_block = block  # Skip processing, keep original
             processed_blocks.append(processed_block)
@@ -354,6 +451,7 @@ class Pipeline:
             topics = [topic.strip() for topic in self.valves.TOPICS.split(",")]
             max_tokens = self.valves.MAX_TOKENS
             model = self.valves.MODEL
+            random_user_agent = self.valves.RANDOM_USER_AGENT
             
             client = AsyncOpenAI(api_key=openai_key)
             
@@ -361,7 +459,7 @@ class Pipeline:
             blocks = extract_blocks(user_message)
             
             # Process blocks
-            processed_blocks = asyncio.run(self.process_blocks(blocks, client, topics, max_tokens, model))
+            processed_blocks = asyncio.run(self.process_blocks(blocks, client, topics, max_tokens, model, random_user_agent))
             
             # Combine processed blocks into final output
             result = "\n".join(processed_blocks)
@@ -379,5 +477,11 @@ class Pipeline:
             "OPENAI_API_KEY": {"type": "string", "value": self.valves.OPENAI_API_KEY},
             "TOPICS": {"type": "string", "value": self.valves.TOPICS},
             "MAX_TOKENS": {"type": "number", "value": self.valves.MAX_TOKENS},
-            "MODEL": {"type": "string", "value": self.valves.MODEL}
+            "MODEL": {"type": "string", "value": self.valves.MODEL},
+            "RANDOM_USER_AGENT": {"type": "boolean", "value": self.valves.RANDOM_USER_AGENT},
+            "REDDIT_CLIENT_ID": {"type": "string", "value": self.valves.REDDIT_CLIENT_ID},
+            "REDDIT_SECRET": {"type": "string", "value": self.valves.REDDIT_SECRET},
+            "REDDIT_USER_AGENT": {"type": "string", "value": self.valves.REDDIT_USER_AGENT},
+            "REDDIT_USERNAME": {"type": "string", "value": self.valves.REDDIT_USERNAME},
+            "REDDIT_PASSWORD": {"type": "string", "value": self.valves.REDDIT_PASSWORD}
         }
