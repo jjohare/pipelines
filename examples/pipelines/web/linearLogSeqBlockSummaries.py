@@ -202,7 +202,7 @@ async def scrape_url(url: str, random_user_agent: bool) -> str:
             return None
         finally:
             await browser.close()
-
+            
 
 def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
@@ -219,13 +219,15 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
     """
     topics_str = ", ".join(topics)
     prompt = (
-        f"Summarize the following web page and return the result in JSON format. "
+        f"You are a helpful assistant that summarizes web pages and returns results in JSON format.\n"
+        f"Summarize the following web page, ensuring appropriate UK English spelling, handling concatenated words, and returning the result in JSON format. "
         f"Follow these guidelines:\n"
         f"1. If the page is accessible and contains content:\n"
         f"   a. Create a brief descriptive heading (max 50 characters).\n"
-        f"   b. Summarize the content in approximately {max_tokens} tokens.\n"
-        f"   c. Explicitly incorporate at least 3 relevant topics from this list: {topics_str}.\n"
-        f"   d. Format the summary using Logseq-style indentation (tab, dash, space).\n"
+        f"   b. Summarize the content in approximately {max_tokens} tokens, focusing on key information and insights.\n"
+        f"   c. Explicitly incorporate and mention at least 3 relevant topics from this list: {topics_str}. Use the format [[topic]] to mention them within the summary text.\n"
+        f"   d. Format the summary using Logseq-style nested indentation (multiple tabs, dash, space) for better readability within a document.\n"
+        f"   e. Ensure proper UK English spelling and separate mistakenly concatenated words.\n"
         f"2. If the page is inaccessible or empty, return the original link without commentary.\n"
         f"3. Return the result in this JSON format:\n"
         f"   {{\"status\": \"success\" or \"failure\",\n"
@@ -265,6 +267,13 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
 
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
+        # In-Context Learning Examples
+        {"role": "user", "content": "Example 1:\nLink text: 'Example Website'\nWeb page to summarize: https://www.example.com\nTopics: Technology, Artificial Intelligence, Machine Learning\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"Example Website Summary\",\n  \"summary\": \"\\t- This is a summary of the Example Website. It discusses various aspects of [[Technology]], including advancements in [[Artificial Intelligence]] and the applications of [[Machine Learning]].\",\n  \"used_topics\": [\"Technology\", \"Artificial Intelligence\", \"Machine Learning\"]\n}"},
+        {"role": "user", "content": "Example 2:\nLink text: 'Page Not Found'\nWeb page to summarize: https://www.example.com/404\nTopics: Technology, Artificial Intelligence, Machine Learning\nExpected JSON Output:\n{\n  \"status\": \"failure\",\n  \"original_text\": \"- [Page Not Found](https://www.example.com/404)\"\n}"},
+        {"role": "user", "content": "Example 3:\nLink text: 'TheImportanceofGrammar'\nWeb page to summarize: https://www.example.com/grammar\nTopics: Grammar, Linguistics, Education\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"The Importance of Grammar\",\n  \"summary\": \"\\t- This article highlights the importance of [[Grammar]] in effective communication. It explores the role of [[Linguistics]] in understanding grammar and its impact on [[Education]].\",\n  \"used_topics\": [\"Grammar\", \"Linguistics\", \"Education\"]\n}"},
+        {"role": "user", "content": "Example 4:\nLink text: 'ColourfulWebsite'\nWeb page to summarize: https://www.example.com/colours\nTopics: Colour, Design, Art\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"Colourful Website Summary\",\n  \"summary\": \"\\t- This website showcases the use of [[Colour]] in design. It explores various colour palettes and their application in [[Design]] and [[Art]].\",\n  \"used_topics\": [\"Colour\", \"Design\", \"Art\"]\n}"},
+        {"role": "user", "content": "Example 5:\nLink text: 'Interesting Reddit Discussion'\nWeb page to summarize: https://www.reddit.com/r/example/comments/123456/interesting_discussion/\nTopics: Reddit, Discussion, Community\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"Reddit: Interesting Discussion\",\n  \"summary\": \"Title: Interesting Reddit Discussion\\nAuthor: u/exampleuser\\nScore: 100\\nNumber of comments: 50\\n\\nContent:\\nThis is the content of the Reddit post...\\n\",\n  \"used_topics\": [\"Reddit\", \"Discussion\", \"Community\"]\n}"},
+        # Actual Prompt
         {"role": "user", "content": prompt},
         {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
         {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
@@ -286,7 +295,6 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
             "status": "failure",
             "original_text": f"- [{link_text}]({url})"
         }
-
 
 async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool, reddit_client: 'RedditClient') -> str:
     """
@@ -313,12 +321,17 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
             result = await summarize_url(client, link_text, url, topics, max_tokens, model, random_user_agent)
 
         if result["status"] == "success":
-            # Format the successful summary in Logseq-compatible format
+            # Integrate Logseq topics as mentions
+            summary_with_mentions = result["summary"]
+            for topic in result["used_topics"]:
+                summary_with_mentions = summary_with_mentions.replace(topic, f"[[{topic}]]")
+
+            # Format the successful summary in Logseq-compatible format with nested bullets
             formatted_summary = (
                 f"- ### {result['heading']}\n"
-                f"\t[This web link has been automatically summarised]({url})\n"
-                f"{result['summary']}\n"
-                f"\tTopics: {', '.join(result['used_topics'])}"
+                f"\t- [This web link has been automatically summarised]({url})\n"
+                f"{summary_with_mentions}\n"  # Use summary with mentions here
+                f"\t- Topics: {', '.join(result['used_topics'])}"
             )
             return formatted_summary
         else:
