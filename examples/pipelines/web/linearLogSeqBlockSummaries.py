@@ -33,7 +33,7 @@ import json
 import random
 import requests
 from typing import List, Union, Tuple
-from schemas import OpenAIChatMessage  # Assuming this schema is available in your environment
+# from schemas import OpenAIChatMessage  # Commented out as it's unclear where this schema comes from
 from pydantic import BaseModel
 import sys
 import subprocess
@@ -43,8 +43,7 @@ from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 from openai import AsyncOpenAI
 
-# --- Helper Functions ---
-
+# --- Package Installation ---
 def install(package):
     """
     Installs the specified package using pip.
@@ -55,6 +54,18 @@ def install(package):
     """
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
+# Install required packages
+install("requests")
+install("playwright")
+install("beautifulsoup4")
+install("openai")
+install("playwright-stealth")
+
+# Install Playwright browsers and dependencies
+subprocess.run(["playwright", "install"], check=True)
+subprocess.run(["playwright", "install-deps"], check=True)
+
+# --- Helper Functions ---
 
 def extract_blocks(text: str) -> List[str]:
     """
@@ -64,20 +75,20 @@ def extract_blocks(text: str) -> List[str]:
         text (str): Input text containing markdown-style blocks.
 
     Returns:
-        List[str]: List of extracted text blocks.
+        List[str]: A list of extracted text blocks.
     """
     return re.split(r'\n(?=- )', text)
 
 
 def extract_url_from_block(block: str) -> Tuple[str, str, str]:
     """
-    Extracts URL from the beginning of a text block.
+    Extracts the URL from the beginning of a text block.
 
     Args:
-        block (str): Text block potentially starting with a URL.
+        block (str): A text block potentially starting with a URL.
 
     Returns:
-        Tuple[str, str, str]: Tuple containing (link_text, url, remaining_text).
+        Tuple[str, str, str]: A tuple containing (link_text, url, remaining_text).
     """
     # Remove "- " prefix
     content = block[2:].strip()
@@ -100,7 +111,7 @@ def should_process_block(block: str) -> bool:
     Determines if a block should be processed or skipped.
 
     Args:
-        block (str): Text block to analyze.
+        block (str): The text block to analyze.
 
     Returns:
         bool: True if the block should be processed, False otherwise.
@@ -200,8 +211,8 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
     Args:
         link_text (str): The text of the link, if available.
         url (str): The URL to summarize.
-        topics (List[str]): List of topics to consider in the summaries.
-        max_tokens (int): Maximum number of tokens for the summary.
+        topics (List[str]): A list of topics to consider in the summaries.
+        max_tokens (int): The maximum number of tokens for the summary.
 
     Returns:
         str: The generated prompt for the OpenAI API.
@@ -235,8 +246,8 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         client (AsyncOpenAI): The OpenAI API client.
         link_text (str): The text of the link, if available.
         url (str): The URL to summarize.
-        topics (List[str]): List of topics to consider in the summaries.
-        max_tokens (int): Maximum number of tokens for the summary.
+        topics (List[str]): A list of topics to consider in the summaries.
+        max_tokens (int): The maximum number of tokens for the summary.
         model (str): The OpenAI model to use for summarization.
         random_user_agent (bool): Whether to use a random user agent for scraping.
 
@@ -284,8 +295,8 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
     Args:
         client (AsyncOpenAI): The OpenAI API client.
         block (str): The text block to process.
-        topics (List[str]): List of topics to consider in the summaries.
-        max_tokens (int): Maximum number of tokens for each summary.
+        topics (List[str]): A list of topics to consider in the summaries.
+        max_tokens (int): The maximum number of tokens for the summary.
         model (str): The OpenAI model to use for summarization.
         random_user_agent (bool): Whether to use a random user agent for scraping.
         reddit_client (RedditClient): The Reddit API client.
@@ -378,11 +389,11 @@ class Pipeline:
         Configuration options for the pipeline.
         These options can be set through the OpenWebUI interface.
         """
-        OPENAI_API_KEY: str = ""  # OpenAI API key
-        TOPICS: str = ""  # Comma-separated list of topics to be considered when generating summaries
-        MAX_TOKENS: int = 300  # Maximum number of tokens for each summary
-        MODEL: str = "gpt-4o-mini"  # Default model 
-        RANDOM_USER_AGENT: bool = True  # Whether to use random user agents for web scraping
+        OPENAI_API_KEY: str = ""
+        TOPICS: str = ""
+        MAX_TOKENS: int = 300
+        MODEL: str = "gpt-4o-mini"  # Use gpt-4o-mini model
+        RANDOM_USER_AGENT: bool = True
         REDDIT_CLIENT_ID: str = ""
         REDDIT_SECRET: str = ""
         REDDIT_USER_AGENT: str = "openwebui reddit lookup for logseq"
@@ -418,15 +429,15 @@ class Pipeline:
         Processes all blocks, either summarizing or skipping them based on content.
 
         Args:
-            blocks (List[str]): List of text blocks to process.
+            blocks (List[str]): A list of text blocks to process.
             client (AsyncOpenAI): The OpenAI API client.
-            topics (List[str]): List of topics to consider in the summaries.
-            max_tokens (int): Maximum number of tokens for each summary.
+            topics (List[str]): A list of topics to consider in the summaries.
+            max_tokens (int): The maximum number of tokens for each summary.
             model (str): The OpenAI model to use for summarization.
-            random_user_agent (bool): Whether to use random user agents for web scraping.
+            random_user_agent (bool): Whether to use a random user agent for web scraping.
 
         Returns:
-            List[str]: List of processed blocks.
+            List[str]: A list of processed blocks.
         """
         processed_blocks = []
         for block in blocks:
