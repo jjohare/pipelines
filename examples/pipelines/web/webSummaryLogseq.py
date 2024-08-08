@@ -32,7 +32,7 @@ import re
 import json
 import random
 import requests
-from typing import List, Union, Tuple
+from typing import List, Union, Tuple, Dict
 # from schemas import OpenAIChatMessage  # Commented out as it's unclear where this schema comes from
 from pydantic import BaseModel
 import sys
@@ -42,6 +42,7 @@ from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
 from openai import AsyncOpenAI
+
 
 # --- Package Installation ---
 def install(package):
@@ -204,6 +205,10 @@ async def scrape_url(url: str, random_user_agent: bool) -> str:
             await browser.close()
             
 
+import random
+import json
+from typing import List, Dict
+
 def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
     Creates a prompt for generating a summary of the specified URL considering the given topics.
@@ -225,7 +230,7 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
         f"1. If the page is accessible and contains content:\n"
         f"   a. Create a brief descriptive heading (max 50 characters).\n"
         f"   b. Summarize the content in approximately {max_tokens} tokens, focusing on key information and insights.\n"
-        f"   c. Explicitly incorporate and mention at least 3 relevant topics from this list: {topics_str}. Use the format [[topic]] to mention them within the summary text.\n"
+        f"   c. If appropriate to the context then select, incorporate and mention relevant topics from this list: {topics_str}. Use the format [[topic]] to mention them within and inline within the summary text, replacing an analogue word or phrase ONCE with the topic tag in logseq link format as indicated.\n"
         f"   d. Format the summary using Logseq-style nested indentation (multiple tabs, dash, space) for better readability within a document.\n"
         f"   e. Ensure proper UK English spelling and separate mistakenly concatenated words.\n"
         f"2. If the page is inaccessible or empty, return the original link without commentary.\n"
@@ -263,21 +268,83 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
             "original_text": f"- [{link_text}]({url})"
         }
 
-    prompt = create_prompt(link_text, url, topics, max_tokens)
+    # Function to randomly select topics
+    def random_topics():
+        return random.sample(topics, 3)
+
+    # Create the in-context learning examples with randomly selected topics
+    examples = [
+        {
+            "link_text": "Example Website",
+            "url": "https://www.example.com",
+            "topics": random_topics(),
+            "expected_output": {
+                "status": "success",
+                "heading": "Example Website Summary",
+                "summary": "\t- This is a summary of the Example Website. It discusses various aspects of [[topic1]], including advancements in [[topic2]] and the applications of [[topic3]].",
+                "used_topics": random_topics()
+            }
+        },
+        {
+            "link_text": "Page Not Found",
+            "url": "https://www.example.com/404",
+            "topics": random_topics(),
+            "expected_output": {
+                "status": "failure",
+                "original_text": "- [Page Not Found](https://www.example.com/404)"
+            }
+        },
+        {
+            "link_text": "The Importance of Grammar",
+            "url": "https://www.example.com/grammar",
+            "topics": random_topics(),
+            "expected_output": {
+                "status": "success",
+                "heading": "The Importance of Grammar",
+                "summary": "\t- This article highlights the importance of [[topic1]] in effective communication. It explores the role of [[topic2]] in understanding [[topic3]].",
+                "used_topics": random_topics()
+            }
+        },
+        {
+            "link_text": "Colourful Website",
+            "url": "https://www.example.com/colours",
+            "topics": random_topics(),
+            "expected_output": {
+                "status": "success",
+                "heading": "Colourful Website Summary",
+                "summary": "\t- This website showcases the use of [[topic1]] in design. It explores various colour palettes and their application in [[topic2]] and [[topic3]].",
+                "used_topics": random_topics()
+            }
+        },
+        {
+            "link_text": "Interesting Reddit Discussion",
+            "url": "https://www.reddit.com/r/example/comments/123456/interesting_discussion/",
+            "topics": random_topics(),
+            "expected_output": {
+                "status": "success",
+                "heading": "Reddit: Interesting Discussion",
+                "summary": "Title: Interesting Reddit Discussion\nAuthor: u/exampleuser\nScore: 100\nNumber of comments: 50\n\nContent:\nThis is the content of the Reddit post...",
+                "used_topics": random_topics()
+            }
+        }
+    ]
 
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
-        # In-Context Learning Examples
-        {"role": "user", "content": "Example 1:\nLink text: 'Example Website'\nWeb page to summarize: https://www.example.com\nTopics: Technology, Artificial Intelligence, Machine Learning\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"Example Website Summary\",\n  \"summary\": \"\\t- This is a summary of the Example Website. It discusses various aspects of [[Technology]], including advancements in [[Artificial Intelligence]] and the applications of [[Machine Learning]].\",\n  \"used_topics\": [\"Technology\", \"Artificial Intelligence\", \"Machine Learning\"]\n}"},
-        {"role": "user", "content": "Example 2:\nLink text: 'Page Not Found'\nWeb page to summarize: https://www.example.com/404\nTopics: Technology, Artificial Intelligence, Machine Learning\nExpected JSON Output:\n{\n  \"status\": \"failure\",\n  \"original_text\": \"- [Page Not Found](https://www.example.com/404)\"\n}"},
-        {"role": "user", "content": "Example 3:\nLink text: 'TheImportanceofGrammar'\nWeb page to summarize: https://www.example.com/grammar\nTopics: Grammar, Linguistics, Education\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"The Importance of Grammar\",\n  \"summary\": \"\\t- This article highlights the importance of [[Grammar]] in effective communication. It explores the role of [[Linguistics]] in understanding grammar and its impact on [[Education]].\",\n  \"used_topics\": [\"Grammar\", \"Linguistics\", \"Education\"]\n}"},
-        {"role": "user", "content": "Example 4:\nLink text: 'ColourfulWebsite'\nWeb page to summarize: https://www.example.com/colours\nTopics: Colour, Design, Art\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"Colourful Website Summary\",\n  \"summary\": \"\\t- This website showcases the use of [[Colour]] in design. It explores various colour palettes and their application in [[Design]] and [[Art]].\",\n  \"used_topics\": [\"Colour\", \"Design\", \"Art\"]\n}"},
-        {"role": "user", "content": "Example 5:\nLink text: 'Interesting Reddit Discussion'\nWeb page to summarize: https://www.reddit.com/r/example/comments/123456/interesting_discussion/\nTopics: Reddit, Discussion, Community\nExpected JSON Output:\n{\n  \"status\": \"success\",\n  \"heading\": \"Reddit: Interesting Discussion\",\n  \"summary\": \"Title: Interesting Reddit Discussion\\nAuthor: u/exampleuser\\nScore: 100\\nNumber of comments: 50\\n\\nContent:\\nThis is the content of the Reddit post...\\n\",\n  \"used_topics\": [\"Reddit\", \"Discussion\", \"Community\"]\n}"},
-        # Actual Prompt
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
-        {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
+
+    for example in examples:
+        example_topics = ", ".join(example['topics'])
+        messages.append({
+            "role": "user",
+            "content": f"Example:\nLink text: '{example['link_text']}'\nWeb page to summarize: {example['url']}\nTopics: {example_topics}\nExpected JSON Output:\n{json.dumps(example['expected_output'], indent=2)}"
+        })
+
+    # Actual Prompt
+    prompt = create_prompt(link_text, url, topics, max_tokens)
+    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."})
+    messages.append({"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"})
 
     response = await client.chat.completions.create(
         model=model,
@@ -405,7 +472,7 @@ class Pipeline:
         OPENAI_API_KEY: str = ""
         TOPICS: str = ""
         MAX_TOKENS: int = 300
-        MODEL: str = "gpt-4o-mini"  # Use gpt-4o-mini model
+        MODEL: str = "gpt-4o-2024-08-06"  # Use gpt-4o json model
         RANDOM_USER_AGENT: bool = True
         REDDIT_CLIENT_ID: str = ""
         REDDIT_SECRET: str = ""
