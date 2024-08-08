@@ -21,8 +21,8 @@ class Pipeline:
         Configuration options for the pipeline.
         These options can be set through the OpenWebUI interface.
         """
-        ragflow_base_url: str = "http://192.168.0.51/v1/"  # Set your server IP here
-        ragflow_api_key: str = "your_actual_ragflow_api_key"  # Set your API key here
+        ragflow_base_url: str = "http://your.server.ip/v1/"  # Default value, should be updated by user
+        ragflow_api_key: str = "ragflow-api-key"  # Default value, should be updated by user
 
     def __init__(self):
         self.valves = self.Valves()
@@ -43,6 +43,8 @@ class Pipeline:
             try:
                 data = response.json()
                 logging.debug(f"Response JSON: {data}")
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid response format")
                 self.conversation_id = data.get("data", {}).get("id")
                 if not self.conversation_id:
                     raise ValueError("Missing conversation ID in response")
@@ -72,6 +74,8 @@ class Pipeline:
             try:
                 data = response.json()
                 logging.debug(f"Response JSON: {data}")
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid response format")
                 answer = data.get("data", {}).get("answer", "No answer found.")
                 if answer is None:
                     raise ValueError("Missing answer in response")
