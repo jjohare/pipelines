@@ -64,6 +64,7 @@ install("playwright-stealth")
 
 # Install Playwright browsers and dependencies
 subprocess.run(["playwright", "install"], check=True)
+subprocess.run(["playwright-stealth", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
 
 # --- Helper Functions ---
