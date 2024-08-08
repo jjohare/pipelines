@@ -10,7 +10,7 @@ import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth_async
-from openai import AsyncOpenAI
+import openai
 
 # --- Package Installation ---
 def install(package):
@@ -202,12 +202,12 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
     )
     return prompt
 
-async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> dict:
+async def summarize_url(api_key: str, link_text: str, url: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> dict:
     """
     Summarizes a single URL using the OpenAI API.
 
     Args:
-        client (AsyncOpenAI): The OpenAI API client.
+        api_key (str): The OpenAI API key.
         link_text (str): The text of the link, if available.
         url (str): The URL to summarize.
         topics (List[str]): A list of topics to consider in the summaries.
@@ -227,6 +227,8 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
 
     prompt = create_prompt(link_text, url, topics, max_tokens)
 
+    openai.api_key = api_key
+
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
         {"role": "user", "content": prompt},
@@ -234,7 +236,7 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
         {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
 
-    response = await client.chat_completions.create(
+    response = openai.ChatCompletion.create(
         model=model,
         messages=messages,
         max_tokens=max_tokens
@@ -251,12 +253,12 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
             "original_text": f"- [{link_text}]({url})"
         }
 
-async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool, reddit_client: 'RedditClient') -> str:
+async def process_block(api_key: str, block: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool, reddit_client: 'RedditClient') -> str:
     """
     Processes a single block, generating a summary if it contains a URL at the beginning.
 
     Args:
-        client (AsyncOpenAI): The OpenAI API client.
+        api_key (str): The OpenAI API key.
         block (str): The text block to process.
         topics (List[str]): A list of topics to consider in the summaries.
         max_tokens (int): The maximum number of tokens for the summary.
@@ -273,7 +275,7 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
         if reddit_client.is_reddit_url(url):
             result = reddit_client.get_reddit_content(url)
         else:
-            result = await summarize_url(client, link_text, url, topics, max_tokens, model, random_user_agent)
+            result = await summarize_url(api_key, link_text, url, topics, max_tokens, model, random_user_agent)
 
         if result["status"] == "success":
             # Format the successful summary in Logseq-compatible format
@@ -353,7 +355,7 @@ class Pipeline:
         OPENAI_API_KEY: str = ""
         TOPICS: str = ""
         MAX_TOKENS: int = 300
-        MODEL: str = "gpt-4o-2024-08-06"  # Use gpt-4o json model
+        MODEL: str = "gpt-4o-mini"  # Use gpt-4o-mini model
         RANDOM_USER_AGENT: bool = True
         REDDIT_CLIENT_ID: str = ""
         REDDIT_SECRET: str = ""
@@ -385,13 +387,13 @@ class Pipeline:
         """
         print(f"on_shutdown:{__name__}")
 
-    async def process_blocks(self, blocks: List[str], client: AsyncOpenAI, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> List[str]:
+    async def process_blocks(self, blocks: List[str], api_key: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> List[str]:
         """
         Processes all blocks, either summarizing or skipping them based on content.
 
         Args:
             blocks (List[str]): A list of text blocks to process.
-            client (AsyncOpenAI): The OpenAI API client.
+            api_key (str): The OpenAI API key.
             topics (List[str]): A list of topics to consider in the summaries.
             max_tokens (int): The maximum number of tokens for each summary.
             model (str): The OpenAI model to use for summarization.
@@ -403,7 +405,7 @@ class Pipeline:
         processed_blocks = []
         for block in blocks:
             if should_process_block(block):
-                processed_block = await process_block(client, block, topics, max_tokens, model, random_user_agent, self.reddit_client)
+                processed_block = await process_block(api_key, block, topics, max_tokens, model, random_user_agent, self.reddit_client)
             else:
                 processed_block = block  # Skip processing, keep original
             processed_blocks.append(processed_block)
@@ -429,13 +431,11 @@ class Pipeline:
             model = self.valves.MODEL
             random_user_agent = self.valves.RANDOM_USER_AGENT
 
-            client = AsyncOpenAI(api_key=openai_key)
-
             # Extract blocks from the user message
             blocks = extract_blocks(user_message)
 
             # Process blocks
-            processed_blocks = asyncio.run(self.process_blocks(blocks, client, topics, max_tokens, model, random_user_agent))
+            processed_blocks = asyncio.run(self.process_blocks(blocks, openai_key, topics, max_tokens, model, random_user_agent))
 
             # Combine processed blocks into final output
             result = "\n".join(processed_blocks)
@@ -461,3 +461,4 @@ class Pipeline:
             "REDDIT_USERNAME": {"type": "string", "value": self.valves.REDDIT_USERNAME},
             "REDDIT_PASSWORD": {"type": "string", "value": self.valves.REDDIT_PASSWORD}
         }
+
