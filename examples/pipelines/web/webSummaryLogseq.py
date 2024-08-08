@@ -1,48 +1,16 @@
-"""
-Enhanced Web Summary Pipeline for OpenWebUI and Pipelines
-
-This pipeline script integrates with OpenWebUI and Pipelines to process markdown-style text blocks,
-extract URLs, and generate summaries of web pages using the OpenAI API. It includes Reddit API
-integration and improved web scraping capabilities.
-
-Key features:
-- Processing of text blocks starting with "- "
-- URL extraction from the beginning of text blocks
-- Efficient web scraping using Playwright with stealth mode
-- Reddit API integration for Reddit URLs
-- Content filtering to reduce irrelevant data
-- Skipping of blocks with embedded links and lots of text
-- Topic highlighting in summaries
-- Customizable summary length
-- Incorporation of original links in summaries
-- JSON-structured responses for better parsing
-- Logseq-compatible output format
-- Random user agent selection for web scraping
-
-Usage:
-1. Set the OPENAI_API_KEY in the Valves configuration.
-2. Set the TOPICS (comma-separated) in the Valves configuration.
-3. Optionally adjust MAX_TOKENS in the Valves configuration.
-4. Set Reddit API credentials if needed.
-5. Input markdown-style text with blocks starting with "- " in the user message.
-6. The pipeline will process eligible blocks, generate summaries, and return the modified text.
-"""
-
 import re
 import json
 import random
 import requests
-from typing import List, Union, Tuple, Dict
-# from schemas import OpenAIChatMessage  # Commented out as it's unclear where this schema comes from
+from typing import List, Tuple
 from pydantic import BaseModel
 import sys
 import subprocess
 import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-from playwright-stealth import stealth_async
+from playwright_stealth import stealth_async
 from openai import AsyncOpenAI
-
 
 # --- Package Installation ---
 def install(package):
@@ -64,7 +32,6 @@ install("playwright-stealth")
 
 # Install Playwright browsers and dependencies
 subprocess.run(["playwright", "install"], check=True)
-subprocess.run(["playwright-stealth", "install"], check=True)
 subprocess.run(["playwright", "install-deps"], check=True)
 
 # --- Helper Functions ---
@@ -80,7 +47,6 @@ def extract_blocks(text: str) -> List[str]:
         List[str]: A list of extracted text blocks.
     """
     return re.split(r'\n(?=- )', text)
-
 
 def extract_url_from_block(block: str) -> Tuple[str, str, str]:
     """
@@ -107,7 +73,6 @@ def extract_url_from_block(block: str) -> Tuple[str, str, str]:
 
     return "", "", content
 
-
 def should_process_block(block: str) -> bool:
     """
     Determines if a block should be processed or skipped.
@@ -123,7 +88,6 @@ def should_process_block(block: str) -> bool:
         return False
     return True
 
-
 async def setup_playwright():
     """
     Sets up Playwright by installing the required browsers.
@@ -134,7 +98,6 @@ async def setup_playwright():
             await p.chromium.install()
     except Exception as e:
         print(f"Error setting up Playwright: {e}")
-
 
 def filter_content(html_content: str) -> str:
     """
@@ -163,7 +126,6 @@ def filter_content(html_content: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     words = text.split()[:32000]
     return ' '.join(words)
-
 
 async def scrape_url(url: str, random_user_agent: bool) -> str:
     """
@@ -204,11 +166,6 @@ async def scrape_url(url: str, random_user_agent: bool) -> str:
             return None
         finally:
             await browser.close()
-            
-
-import random
-import json
-from typing import List, Dict
 
 def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) -> str:
     """
@@ -231,9 +188,10 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
         f"1. If the page is accessible and contains content:\n"
         f"   a. Create a brief descriptive heading (max 50 characters).\n"
         f"   b. Summarize the content in approximately {max_tokens} tokens, focusing on key information and insights.\n"
-        f"   c. If appropriate to the context then select, incorporate and mention relevant topics from this list: {topics_str}. Use the format [[topic]] to mention them within and inline within the summary text, replacing an analogue word or phrase ONCE with the topic tag in logseq link format as indicated.\n"
-        f"   d. Format the summary using Logseq-style nested indentation (multiple tabs, dash, space) for better readability within a document.\n"
-        f"   e. Ensure proper UK English spelling and separate mistakenly concatenated words.\n"
+        f"   c. If appropriate to the context then select, incorporate and mention relevant topics from this list: {topics_str}.\n" 
+        f"   d. You MUST ensure that selected topics from the list return in the logseq square bracket format [[topic]] and mention them within, and inline within the summary text, only using each topic ONCE in the summary\n"
+        f"   f. Format the summary using Logseq-style nested indentation (multiple tabs, dash, space) for better readability within a document.\n"
+        f"   g. Ensure proper UK English spelling and separate mistakenly concatenated words.\n"
         f"2. If the page is inaccessible or empty, return the original link without commentary.\n"
         f"3. Return the result in this JSON format:\n"
         f"   {{\"status\": \"success\" or \"failure\",\n"
@@ -244,7 +202,6 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
         f"Web page to summarize: {url}"
     )
     return prompt
-
 
 async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool) -> dict:
     """
@@ -269,83 +226,14 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
             "original_text": f"- [{link_text}]({url})"
         }
 
-    # Function to randomly select topics
-    def random_topics():
-        return random.sample(topics, 3)
-
-    # Create the in-context learning examples with randomly selected topics
-    examples = [
-        {
-            "link_text": "Example Website",
-            "url": "https://www.example.com",
-            "topics": random_topics(),
-            "expected_output": {
-                "status": "success",
-                "heading": "Example Website Summary",
-                "summary": "\t- This is a summary of the Example Website. It discusses various aspects of [[topic1]], including advancements in [[topic2]] and the applications of [[topic3]].",
-                "used_topics": random_topics()
-            }
-        },
-        {
-            "link_text": "Page Not Found",
-            "url": "https://www.example.com/404",
-            "topics": random_topics(),
-            "expected_output": {
-                "status": "failure",
-                "original_text": "- [Page Not Found](https://www.example.com/404)"
-            }
-        },
-        {
-            "link_text": "The Importance of Grammar",
-            "url": "https://www.example.com/grammar",
-            "topics": random_topics(),
-            "expected_output": {
-                "status": "success",
-                "heading": "The Importance of Grammar",
-                "summary": "\t- This article highlights the importance of [[topic1]] in effective communication. It explores the role of [[topic2]] in understanding [[topic3]].",
-                "used_topics": random_topics()
-            }
-        },
-        {
-            "link_text": "Colourful Website",
-            "url": "https://www.example.com/colours",
-            "topics": random_topics(),
-            "expected_output": {
-                "status": "success",
-                "heading": "Colourful Website Summary",
-                "summary": "\t- This website showcases the use of [[topic1]] in design. It explores various colour palettes and their application in [[topic2]] and [[topic3]].",
-                "used_topics": random_topics()
-            }
-        },
-        {
-            "link_text": "Interesting Reddit Discussion",
-            "url": "https://www.reddit.com/r/example/comments/123456/interesting_discussion/",
-            "topics": random_topics(),
-            "expected_output": {
-                "status": "success",
-                "heading": "Reddit: Interesting Discussion",
-                "summary": "Title: Interesting Reddit Discussion\nAuthor: u/exampleuser\nScore: 100\nNumber of comments: 50\n\nContent:\nThis is the content of the Reddit post...",
-                "used_topics": random_topics()
-            }
-        }
-    ]
+    prompt = create_prompt(link_text, url, topics, max_tokens)
 
     messages = [
         {"role": "system", "content": "You are a helpful assistant that summarizes web pages and returns results in JSON format."},
+        {"role": "user", "content": prompt},
+        {"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."},
+        {"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"}
     ]
-
-    for example in examples:
-        example_topics = ", ".join(example['topics'])
-        messages.append({
-            "role": "user",
-            "content": f"Example:\nLink text: '{example['link_text']}'\nWeb page to summarize: {example['url']}\nTopics: {example_topics}\nExpected JSON Output:\n{json.dumps(example['expected_output'], indent=2)}"
-        })
-
-    # Actual Prompt
-    prompt = create_prompt(link_text, url, topics, max_tokens)
-    messages.append({"role": "user", "content": prompt})
-    messages.append({"role": "assistant", "content": "I understand. I'll summarize the web page and return the result in the specified JSON format."})
-    messages.append({"role": "user", "content": f"Here is the content of the web page (up to 32000 words):\n\n{scraped_content}"})
 
     response = await client.chat.completions.create(
         model=model,
@@ -363,6 +251,7 @@ async def summarize_url(client: AsyncOpenAI, link_text: str, url: str, topics: L
             "status": "failure",
             "original_text": f"- [{link_text}]({url})"
         }
+
 
 async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_tokens: int, model: str, random_user_agent: bool, reddit_client: 'RedditClient') -> str:
     """
@@ -389,17 +278,12 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
             result = await summarize_url(client, link_text, url, topics, max_tokens, model, random_user_agent)
 
         if result["status"] == "success":
-            # Integrate Logseq topics as mentions
-            summary_with_mentions = result["summary"]
-            for topic in result["used_topics"]:
-                summary_with_mentions = summary_with_mentions.replace(topic, f"[[{topic}]]")
-
-            # Format the successful summary in Logseq-compatible format with nested bullets
+            # Format the successful summary in Logseq-compatible format
             formatted_summary = (
                 f"- ### {result['heading']}\n"
-                f"\t- [This web link has been automatically summarised]({url})\n"
-                f"{summary_with_mentions}\n"  # Use summary with mentions here
-                f"\t- Topics: {', '.join(result['used_topics'])}"
+                f"\t[This web link has been automatically summarised]({url})\n"
+                f"{result['summary']}\n"
+                f"\tTopics: {', '.join(result['used_topics'])}"
             )
             return formatted_summary
         else:
@@ -408,7 +292,6 @@ async def process_block(client: AsyncOpenAI, block: str, topics: List[str], max_
     else:
         # Return the original block if no URL was found
         return block
-
 
 class RedditClient:
     def __init__(self, client_id, client_secret, user_agent, username, password):
@@ -460,7 +343,6 @@ class RedditClient:
             "summary": summary,
             "used_topics": ["Reddit", "Social Media", "User-generated Content"]
         }
-
 
 # --- Main Pipeline Class ---
 
@@ -581,3 +463,4 @@ class Pipeline:
             "REDDIT_USERNAME": {"type": "string", "value": self.valves.REDDIT_USERNAME},
             "REDDIT_PASSWORD": {"type": "string", "value": self.valves.REDDIT_PASSWORD}
         }
+
