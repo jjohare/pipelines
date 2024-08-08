@@ -40,7 +40,7 @@ import subprocess
 import asyncio
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+from playwright-stealth import stealth_async
 from openai import AsyncOpenAI
 
 
