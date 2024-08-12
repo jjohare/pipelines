@@ -188,9 +188,10 @@ def create_prompt(link_text: str, url: str, topics: List[str], max_tokens: int) 
         f"1. If the page is accessible and contains content:\n"
         f"   a. Create a brief descriptive heading (max 50 characters).\n"
         f"   b. Summarize the content in approximately {max_tokens} tokens, focusing on key information and insights.\n"
-        f"   c. If appropriate to the context then select, incorporate and mention relevant topics from this list: {topics_str}. Use the format [[topic]] to mention them within and inline within the summary text, replacing an analogue word or phrase ONCE with the topic tag in logseq link format as indicated.\n"
-        f"   d. Format the summary using Logseq-style nested indentation (multiple tabs, dash, space) for better readability within a document.\n"
-        f"   e. Ensure proper UK English spelling and separate mistakenly concatenated words.\n"
+        f"   c. If appropriate to the context then select, incorporate and mention relevant topics from this list: {topics_str}.\n" 
+        f"   d. You MUST ensure that selected topics from the list return in the logseq square bracket format [[topic]] and mention them within, and inline within the summary text, only using each topic ONCE in the summary\n"
+        f"   f. Format the summary using Logseq-style nested indentation (multiple tabs, dash, space) for better readability within a document.\n"
+        f"   g. Ensure proper UK English spelling and separate mistakenly concatenated words.\n"
         f"2. If the page is inaccessible or empty, return the original link without commentary.\n"
         f"3. Return the result in this JSON format:\n"
         f"   {{\"status\": \"success\" or \"failure\",\n"
@@ -462,5 +463,4 @@ class Pipeline:
             "REDDIT_USERNAME": {"type": "string", "value": self.valves.REDDIT_USERNAME},
             "REDDIT_PASSWORD": {"type": "string", "value": self.valves.REDDIT_PASSWORD}
         }
-
 
