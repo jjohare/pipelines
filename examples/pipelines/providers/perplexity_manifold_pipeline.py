@@ -68,14 +68,15 @@ class Pipeline:
             "accept": "application/json"
         }
 
+        # Enhanced payload with citation request
         payload = {
             "model": model_id,
             "messages": [
                 {"role": "system", "content": "Be precise and concise."},
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": f"{user_message} Please include references in your response."}
             ],
             "stream": body.get("stream", True),
-            "return_citations": True,
+            "return_citations": True,  # Request citations explicitly
             "return_images": True
         }
 
