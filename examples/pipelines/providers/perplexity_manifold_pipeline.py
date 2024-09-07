@@ -7,6 +7,8 @@ class Pipeline:
     class Valves(BaseModel):
         PERPLEXITY_API_BASE_URL: str = "https://api.perplexity.ai"
         PERPLEXITY_API_KEY: str = ""
+        RETURN_CITATIONS: bool = True
+        RETURN_IMAGES: bool = True
         pass
 
     def __init__(self):
@@ -76,16 +78,9 @@ class Pipeline:
                 {"role": "user", "content": f"{user_message} Please include references in your response."}
             ],
             "stream": body.get("stream", True),
-            "return_citations": True,  # Request citations explicitly
-            "return_images": True
+            "return_citations": self.valves.RETURN_CITATIONS,  # Use valves setting
+            "return_images": self.valves.RETURN_IMAGES  # Use valves setting
         }
-
-        if "user" in payload:
-            del payload["user"]
-        if "chat_id" in payload:
-            del payload["chat_id"]
-        if "title" in payload:
-            del payload["title"]
 
         print(payload)
 
@@ -94,12 +89,12 @@ class Pipeline:
                 url=f"{self.valves.PERPLEXITY_API_BASE_URL}/chat/completions",
                 json=payload,
                 headers=headers,
-                stream=True,
+                stream=self.valves.RETURN_CITATIONS,  # Set streaming properly
             )
 
             r.raise_for_status()
 
-            if body.get("stream", False):
+            if self.valves.RETURN_CITATIONS:
                 return r.iter_lines()
             else:
                 response = r.json()
