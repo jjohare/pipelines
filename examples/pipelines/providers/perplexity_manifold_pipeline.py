@@ -26,8 +26,12 @@ class Pipeline:
         # Debugging: print the API key to ensure it's loaded
         print(f"Loaded API Key: {self.valves.PERPLEXITY_API_KEY}")
 
-        # Hard-coded model: llama-3.1-sonar-small-128k-chat
-        self.model_id = "llama-3.1-sonar-small-128k-chat"
+        # List of models
+        self.pipelines = [
+            {"id": "llama-3.1-sonar-small-128k-online", "name": "Llama 3 Sonar Small Online"},
+            {"id": "related", "name": "Related"}
+        ]
+        pass
 
     async def on_startup(self):
         # This function is called when the server is started.
@@ -46,7 +50,7 @@ class Pipeline:
         pass
 
     def pipe(
-        self, user_message: str, messages: List[dict], body: dict
+        self, user_message: str, model_id: str, messages: List[dict], body: dict
     ) -> Union[str, Generator, Iterator]:
         # This is where you can add your custom pipelines like RAG.
         print(f"pipe:{__name__}")
@@ -62,9 +66,9 @@ class Pipeline:
 
         # Enhanced payload with citation request
         payload = {
-            "model": self.model_id,  # Hard-coded model
+            "model": model_id,
             "messages": [
-                {"role": "system", "content": "Be precise and concise and return citations inline using wikipedia hyperlink style."},
+                {"role": "system", "content": "Be precise and concise."},
                 {"role": "user", "content": f"{user_message} Please include references in your response."}
             ],
             "stream": body.get("stream", True),
@@ -121,6 +125,6 @@ if __name__ == "__main__":
 
     pipeline = Pipeline()
     pipeline.valves.PERPLEXITY_API_KEY = args.api_key
-    response = pipeline.pipe(user_message=args.prompt, model_id="llama-3.1-sonar-small-128k-chat", messages=[], body={"stream": False})
+    response = pipeline.pipe(user_message=args.prompt, model_id="llama-3-sonar-large-32k-online", messages=[], body={"stream": False})
 
     print("Response:", response)
