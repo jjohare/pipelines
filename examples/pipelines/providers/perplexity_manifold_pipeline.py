@@ -68,8 +68,8 @@ class Pipeline:
         payload = {
             "model": model_id,
             "messages": [
-                {"role": "system", "content": "Be precise and concise."},
-                {"role": "user", "content": f"{user_message} Please include references in your response."}
+                {"role": "system", "content": "Be precise and concise using minimal logseq markdown."},
+                {"role": "user", "content": f"{user_message} with citations explicitly returned as web reference hyperlinks."}
             ],
             "stream": body.get("stream", True),
             "return_citations": self.valves.RETURN_CITATIONS,  # Use valves setting
