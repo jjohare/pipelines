@@ -8,8 +8,14 @@ class Pipeline:
         PERPLEXITY_API_BASE_URL: str = "https://api.perplexity.ai"
         PERPLEXITY_API_KEY: str = ""
         
-        models: List[dict] = []  # Store the models queried from the API
-        selected_model: str = ""  # Store the selected model dynamically
+        # Store the models queried from the API
+        models: List[dict] = []
+        selected_model: str = ""
+
+        # Switches for citations, images, and JSON return
+        return_citations: bool = True
+        return_images: bool = False
+        stream: bool = True
 
         def select_model(self, model_id: str):
             available_model_ids = [model['id'] for model in self.models]
@@ -44,7 +50,6 @@ class Pipeline:
             "accept": "application/json"
         }
 
-        # This is a hypothetical endpoint, try something like /models or /engines
         model_url = f"{self.valves.PERPLEXITY_API_BASE_URL}/models"
 
         try:
@@ -84,15 +89,16 @@ class Pipeline:
             "accept": "application/json"
         }
 
+        # Enhanced payload with dynamic switches for citations and images
         payload = {
             "model": self.valves.selected_model,
             "messages": [
                 {"role": "system", "content": "Be precise and concise."},
                 {"role": "user", "content": f"{user_message} Please include references in your response."}
             ],
-            "stream": body.get("stream", True),
-            "return_citations": True,
-            "return_images": False
+            "stream": body.get("stream", self.valves.stream),  # Set stream mode dynamically
+            "return_citations": self.valves.return_citations,  # Use valve setting for citations
+            "return_images": self.valves.return_images  # Use valve setting for images
         }
 
         print(payload)
@@ -102,12 +108,12 @@ class Pipeline:
                 url=f"{self.valves.PERPLEXITY_API_BASE_URL}/chat/completions",
                 json=payload,
                 headers=headers,
-                stream=True,
+                stream=self.valves.stream,  # Stream switch controlled by valve setting
             )
 
             r.raise_for_status()
 
-            if body.get("stream", False):
+            if self.valves.stream:
                 return r.iter_lines()
             else:
                 response = r.json()
@@ -140,6 +146,9 @@ if __name__ == "__main__":
     parser.add_argument("--api-key", type=str, required=True, help="API key for Perplexity")
     parser.add_argument("--prompt", type=str, required=True, help="Prompt to send to the Perplexity API")
     parser.add_argument("--model-id", type=str, required=False, help="Model ID to use")
+    parser.add_argument("--return-citations", action="store_true", help="Return citations")
+    parser.add_argument("--return-images", action="store_true", help="Return images")
+    parser.add_argument("--stream", action="store_true", help="Stream the response")
 
     args = parser.parse_args()
 
@@ -149,6 +158,7 @@ if __name__ == "__main__":
     # Query the available models
     pipeline.query_models()
 
+    # Set model, citations, images, and stream based on input args
     if args.model_id:
         try:
             pipeline.valves.select_model(args.model_id)
@@ -158,10 +168,14 @@ if __name__ == "__main__":
         # Default to the first model if no model is specified
         pipeline.valves.selected_model = pipeline.valves.models[0]["id"]
 
+    pipeline.valves.return_citations = args.return_citations
+    pipeline.valves.return_images = args.return_images
+    pipeline.valves.stream = args.stream
+
     response = pipeline.pipe(
         user_message=args.prompt,
         messages=[],
-        body={"stream": False}
+        body={"stream": pipeline.valves.stream}
     )
 
     print("Response:", response)
