@@ -69,7 +69,7 @@ class Pipeline:
             "model": model_id,
             "messages": [
                 {"role": "system", "content": "Be precise and concise using minimal logseq markdown."},
-                {"role": "user", "content": f"{user_message} with citations explicitly returned in context as raw web hyperlinks."}
+                {"role": "user", "content": f"{user_message} with citations explicitly returned in context as raw web hyperlinks. Ensure to return web links as citations seperated by new lines."}
             ],
             "stream": body.get("stream", True),
             "return_citations": self.valves.RETURN_CITATIONS,  # Use valves setting
