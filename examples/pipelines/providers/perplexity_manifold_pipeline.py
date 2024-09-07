@@ -68,7 +68,7 @@ class Pipeline:
         payload = {
             "model": model_id,
             "messages": [
-                {"role": "system", "content": "Be precise and concise using minimal logseq markdown."},
+                {"role": "system", "content": "Be precise and concise using minimal logseq markdown. Always return web references as urls for citations."},
                 {"role": "user", "content": f"{user_message} with citations explicitly returned in context as raw web hyperlinks. Ensure to return web links as citations seperated by new lines."}
             ],
             "stream": body.get("stream", True),
